@@ -24,6 +24,10 @@ import kotlin.math.abs
  */
 object ListenParty {
 
+    private const val CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    private const val CODE_LENGTH = 5
+    private const val ABANDONED_MS = 11 * 60_000L
+
     enum class Role { NONE, HOST, MEMBER }
 
     class Member(val uid: String, val name: String, val lastSeen: Long)
@@ -90,6 +94,20 @@ object ListenParty {
 
     private fun sv(): JsonElement = JsonParser().parse("""{".sv":"timestamp"}""")
 
+    private fun newCode(): String =
+        (1..CODE_LENGTH).map { CODE_ALPHABET[rng.nextInt(CODE_ALPHABET.length)] }.joinToString("")
+
+    /**
+     * 房主超过 [ABANDONED_MS] 没心跳的房间算废弃，可以被新房间接管。
+     * 数据库规则里是 10 分钟，这里多留 1 分钟，免得两边时钟差一点就被规则拒绝。
+     */
+    private fun isAbandoned(room: JsonObject): Boolean {
+        val host = room.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: return false
+        val seen = ((room.get("members") as? JsonObject)?.get(host) as? JsonObject)
+            ?.get("lastSeen")?.takeIf { it.isJsonPrimitive }?.asLong ?: return false
+        return Firebase.serverNow() - seen > ABANDONED_MS
+    }
+
     // ---------------------------------------------------------------- 开房 / 加入 / 离开
 
     fun create() {
@@ -101,9 +119,12 @@ object ListenParty {
                 if (!Firebase.configured) return@execute fail("还没配置 Firebase（firebase.properties）")
                 if (!Firebase.ensureAuth()) return@execute fail("连不上 Firebase（" + Firebase.lastStatus + "）")
                 Firebase.syncClock()
-                val alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-                repeat(6) {
-                    val c = (1..5).map { alphabet[rng.nextInt(alphabet.length)] }.joinToString("")
+                repeat(8) {
+                    val c = newCode()
+                    // 先看这个码有没有人在用：没人用，或者房主已经很久没心跳（崩溃 / 直接关游戏留下的），才能拿来用
+                    val snap = Firebase.getWithEtag("rooms/$c") ?: return@repeat
+                    val existing = snap.value as? JsonObject
+                    if (existing != null && !isAbandoned(existing)) return@repeat
                     val room = JsonObject().apply {
                         addProperty("host", Firebase.uid)
                         addProperty("hostName", myName())
@@ -115,7 +136,8 @@ object ListenParty {
                             })
                         })
                     }
-                    if (Firebase.put("rooms/$c", room) != null) {
+                    // 带上刚才读到的版本号：这期间要是别人抢先建了同一个码，写入会失败（412），换个码再试
+                    if (Firebase.putIfUnchanged("rooms/$c", room, snap.etag) != null) {
                         code = c
                         hostUid = Firebase.uid
                         hostName = myName()
@@ -146,6 +168,7 @@ object ListenParty {
                 Firebase.syncClock()
                 val room = Firebase.get("rooms/$c")
                 if (room == null || !room.isJsonObject) return@execute fail("房间 $c 不存在")
+                if (isAbandoned(room.asJsonObject)) return@execute fail("房间 $c 已经没人了")
                 val me = JsonObject().apply {
                     addProperty("name", myName())
                     add("lastSeen", sv())
@@ -175,17 +198,24 @@ object ListenParty {
     private fun leaveNow() {
         val c = code
         val wasHost = role == Role.HOST
-        stopListen?.invoke()
-        stopListen = null
-        role = Role.NONE
-        code = ""
-        members = emptyList()
-        remote = null
-        MusicPlayer.followMode = false
+        abandonLocally()
         try {
             if (wasHost) Firebase.delete("rooms/$c") else Firebase.delete("rooms/$c/members/${Firebase.uid}")
         } catch (_: Exception) {
         }
+    }
+
+    /** 只清本地状态，不动数据库 */
+    private fun abandonLocally() {
+        stopListen?.invoke()
+        stopListen = null
+        role = Role.NONE
+        code = ""
+        hostUid = ""
+        hostName = ""
+        members = emptyList()
+        remote = null
+        MusicPlayer.followMode = false
     }
 
     /** 成员：重新和房主对齐（自己点了别的歌之后想回来时用） */
@@ -216,6 +246,13 @@ object ListenParty {
                             leaveNow()
                             status = "房主关闭了房间"
                         }
+                        return@execute
+                    }
+                    val newHost = room.asJsonObject.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
+                    if (hostUid.isNotEmpty() && newHost != hostUid) {
+                        // 掉线太久，房间码已经被别人的新房间接管了：本地退出，别去碰别人的房间
+                        abandonLocally()
+                        status = "房间已失效（掉线太久），请重新创建或加入"
                         return@execute
                     }
                     apply(room.asJsonObject)

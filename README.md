@@ -60,7 +60,7 @@ gradlew runClient              # 开发环境里直接运行
    - Authentication → 登录方法 → 开启 **匿名**
    - 创建 **Realtime Database**
 2. 把 `firebase.properties.example` 复制成 `src/main/resources/firebase.properties`，填上 `apiKey` 和 `databaseUrl`
-3. 数据库规则建议设成只允许登录用户读写：
+3. 数据库规则设成下面这样：只有登录用户能读写；房间只能由房主改，别人只能改自己的成员信息；不能覆盖别人正在用的房间（房主超过 10 分钟没心跳的废弃房间除外）：
 
 ```json
 {
@@ -68,7 +68,13 @@ gradlew runClient              # 开发环境里直接运行
     "rooms": {
       "$code": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null && (!data.exists() || data.child('host').val() === auth.uid || data.child('members').child(data.child('host').val()).child('lastSeen').val() < now - 600000)",
+        ".validate": "newData.child('host').val() === auth.uid || newData.child('host').val() === data.child('host').val()",
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('rooms').child($code).exists()"
+          }
+        }
       }
     },
     "clock": {

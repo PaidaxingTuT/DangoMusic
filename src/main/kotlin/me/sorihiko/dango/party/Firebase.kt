@@ -125,6 +125,24 @@ object Firebase {
         return http("GET", url(path), null)
     }
 
+    /** 读到的数据 + 版本号（ETag），配合 [putIfUnchanged] 做"没被别人改过才写" */
+    class Snapshot(val value: JsonElement?, val etag: String)
+
+    fun getWithEtag(path: String): Snapshot? {
+        if (!ensureAuth()) return null
+        val res = request("GET", url(path), null, headers = mapOf("X-Firebase-ETag" to "true")) ?: return null
+        return Snapshot(res.json.takeUnless { it.isJsonNull }, res.etag ?: return null)
+    }
+
+    /**
+     * 只有路径上的数据还是 [etag] 那个版本时才写入（路径不存在时 etag 是 "null_etag"）。
+     * 期间被别人改过会失败，[lastStatus] 是 412。
+     */
+    fun putIfUnchanged(path: String, value: JsonElement, etag: String): JsonElement? {
+        if (!ensureAuth()) return null
+        return request("PUT", url(path), value.toString(), headers = mapOf("if-match" to etag))?.json
+    }
+
     fun put(path: String, value: JsonElement): JsonElement? {
         if (!ensureAuth()) return null
         return http("PUT", url(path), value.toString())
@@ -144,7 +162,18 @@ object Firebase {
     @Volatile var lastStatus = 0
         private set
 
-    private fun http(method: String, url: String, body: String?, form: Boolean = false): JsonElement? {
+    private class Response(val json: JsonElement, val etag: String?)
+
+    private fun http(method: String, url: String, body: String?, form: Boolean = false): JsonElement? =
+        request(method, url, body, form)?.json
+
+    private fun request(
+        method: String,
+        url: String,
+        body: String?,
+        form: Boolean = false,
+        headers: Map<String, String> = emptyMap(),
+    ): Response? {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             // HttpURLConnection 不支持 PATCH，用 Firebase 认的 X-HTTP-Method-Override
@@ -156,6 +185,7 @@ object Firebase {
             }
             conn.connectTimeout = 8000
             conn.readTimeout = 10000
+            for ((k, v) in headers) conn.setRequestProperty(k, v)
             if (body != null) {
                 conn.doOutput = true
                 conn.setRequestProperty(
@@ -171,7 +201,7 @@ object Firebase {
                 return null
             }
             val text = conn.inputStream.use { String(it.readBytes(), StandardCharsets.UTF_8) }
-            return JsonParser().parse(text.ifBlank { "null" })
+            return Response(JsonParser().parse(text.ifBlank { "null" }), conn.getHeaderField("ETag"))
         } catch (e: Exception) {
             DangoLogger.warn("Firebase {} failed: {}", method, e.toString())
             lastStatus = -1
