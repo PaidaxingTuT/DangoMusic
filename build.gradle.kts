@@ -20,7 +20,7 @@ plugins {
 apply(plugin = "net.minecraftforge.gradle.forge")
 
 group = "me.sorihiko.dango"
-version = "1.0.0"
+version = "1.0.1"
 
 repositories {
     mavenCentral()
