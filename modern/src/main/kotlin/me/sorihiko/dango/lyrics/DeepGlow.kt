@@ -188,7 +188,9 @@ void main() {
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE)
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE)
         val internal = if (hdr && floatFormat) 0x881A /* GL_RGBA16F */ else GL11.GL_RGBA8
-        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, internal, w, h, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, null as ByteBuffer?)
+        Gl.withDefaultUnpack {
+            GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, internal, w, h, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, null as ByteBuffer?)
+        }
         return id
     }
 
@@ -253,6 +255,9 @@ void main() {
 
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, maskFbo)
         GL11.glViewport(0, 0, w, h)
+        // 原版可能留着裁剪 / 颜色写入遮罩没关，会让清空只清一部分
+        Gl.scissor(false)
+        Gl.colorMask(true, true, true, true)
         // 清空画布要临时把清屏颜色设成透明黑，清完马上改回去：
         // MC 每帧开头用这个颜色（天空 / 雾的颜色）清屏，它自己缓存着值，不改回去的话远处会露出一圈黑色
         savedClear.clear()

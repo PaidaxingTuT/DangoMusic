@@ -179,7 +179,9 @@ object CjkFont {
         val id = Gl.genTexture()
         // 白色 RGB + 字形透明度：不管当前的纹理环境是什么模式，颜色都由顶点颜色决定，不会变黑
         val zero = BufferUtils.createByteBuffer(PAGE * PAGE * 4)
-        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, PAGE, PAGE, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, zero)
+        Gl.withDefaultUnpack {
+            GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, PAGE, PAGE, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, zero)
+        }
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR)
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE)
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE)
@@ -206,15 +208,11 @@ object CjkFont {
         }
         buf.flip()
         val prevTex = Gl.currentTexture()
-        val prevAlign = GL11.glGetInteger(GL11.GL_UNPACK_ALIGNMENT)
-        val prevRow = GL11.glGetInteger(GL11.GL_UNPACK_ROW_LENGTH)
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1)
-        GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, 0)
         Gl.bindTexture(tex)
-        GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, x, y, w, h, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buf)
+        Gl.withDefaultUnpack {
+            GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, x, y, w, h, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buf)
+        }
         Gl.bindTexture(prevTex)
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, prevAlign)
-        GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, prevRow)
     }
 
     private fun bindPage(i: Int) {

@@ -6,18 +6,24 @@ import me.sorihiko.dango.DangoMusic
 import me.sorihiko.dango.events.TickEvent
 import me.sorihiko.dango.events.WorldRenderEndEvent
 
-import net.minecraft.client.Minecraft
-
 /** Fabric / Forge 入口调用：启动和事件转发（两个加载器共用） */
 object ModernDango {
+    /** 是否已经启动（启动前不处理任何事件） */
+    @JvmStatic
+    var started = false
+        private set
+
     @JvmStatic
     fun start() {
+        if (started) return
+        started = true
         DangoClient.start(ModernPlatform, ModernGfx)
     }
 
     /** 每个游戏 tick 开头 */
     @JvmStatic
     fun tick() {
+        if (!started) return
         try {
             ModernGl.init()
         } catch (t: Throwable) {
@@ -35,10 +41,11 @@ object ModernDango {
      */
     @JvmStatic
     fun worldRenderEnd() {
-        val camera = Minecraft.getInstance().gameRenderer.mainCamera
+        if (!started) return
         ModernWorld.basePose.identity()
-            .rotateX(Math.toRadians(camera.xRot.toDouble()).toFloat())
-            .rotateY(Math.toRadians(camera.yRot.toDouble() + 180.0).toFloat())
+            .rotateX(Math.toRadians(McCompat.cameraXRot().toDouble()).toFloat())
+            .rotateY(Math.toRadians(McCompat.cameraYRot().toDouble() + 180.0).toFloat())
+        McCompat.beginWorld()
         McCompat.pushIdentityModelView()
         try {
             // partialTicks 目前没有地方用到，各版本拿它的写法又不一样，就不传了

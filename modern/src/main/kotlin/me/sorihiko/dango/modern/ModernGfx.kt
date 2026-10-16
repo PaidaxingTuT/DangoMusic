@@ -13,14 +13,9 @@ import me.sorihiko.dango.gfx.WorldView
 import me.sorihiko.dango.lyrics.DeepGlow
 import me.sorihiko.dango.ui.GlassRenderContext
 
-import com.mojang.blaze3d.platform.NativeImage
-import com.mojang.blaze3d.systems.RenderSystem
-import com.mojang.blaze3d.vertex.VertexSorting
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Font
 import net.minecraft.client.renderer.LightTexture
-import net.minecraft.client.renderer.texture.DynamicTexture
-import net.minecraft.resources.ResourceLocation
 import org.joml.Matrix4f
 import org.lwjgl.opengl.GL11
 import org.lwjgl.opengl.GL13
@@ -123,7 +118,7 @@ object ModernGfx : Gfx {
             text, x, y, argb, false, pose, buffers,
             Font.DisplayMode.SEE_THROUGH, 0, LightTexture.FULL_BRIGHT,
         )
-        buffers.endBatch()
+        McCompat.vanillaDraw { buffers.endBatch() }
     }
 }
 
@@ -131,14 +126,13 @@ object ModernGfx : Gfx {
 internal class Projection private constructor() {
     fun restore() {
         McCompat.popModelView()
-        RenderSystem.restoreProjectionMatrix()
+        McCompat.popScreenProjection()
     }
 
     companion object {
         /** 原点在左上角、单位是 [w]×[h] 的正交投影（近 1000、远 3000，和 1.8.9 一样） */
         fun screen(w: Float, h: Float): Projection {
-            RenderSystem.backupProjectionMatrix()
-            RenderSystem.setProjectionMatrix(Matrix4f().setOrtho(0f, w, h, 0f, 1000f, 3000f), VertexSorting.ORTHOGRAPHIC_Z)
+            McCompat.pushScreenProjection(Matrix4f().setOrtho(0f, w, h, 0f, 1000f, 3000f))
             McCompat.pushIdentityModelView()
             return Projection()
         }
@@ -147,9 +141,10 @@ internal class Projection private constructor() {
 
 // ---------------------------------------------------------------- 贴图
 
-class ModernTexture(val location: ResourceLocation, val texture: DynamicTexture) : Texture {
+/** 交给原版 TextureManager 管理的一张贴图。[glId] 每次现取（原版的贴图对象会延迟创建 / 重建） */
+class ModernTexture(private val glId: () -> Int, internal val release: () -> Unit) : Texture {
     fun bind() {
-        Gl.bindTexture(texture.id)
+        Gl.bindTexture(glId())
     }
 }
 
@@ -157,22 +152,19 @@ object ModernTextures : Textures {
     override fun upload(name: String, image: BufferedImage): Texture {
         val w = image.width
         val h = image.height
-        val native = NativeImage(w, h, false)
+        // 原版的 NativeImage 用的是 ABGR
+        val abgr = IntArray(w * h)
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val argb = image.getRGB(x, y)
-                // NativeImage 用的是 ABGR
-                val abgr = (argb and 0xFF00FF00.toInt()) or ((argb shr 16) and 0xFF) or ((argb and 0xFF) shl 16)
-                native.setPixelRGBA(x, y, abgr)
+                abgr[y * w + x] = (argb and 0xFF00FF00.toInt()) or ((argb shr 16) and 0xFF) or ((argb and 0xFF) shl 16)
             }
         }
-        val texture = DynamicTexture(native)
-        val location = Minecraft.getInstance().textureManager.register(name, texture)
-        return ModernTexture(location, texture)
+        return McCompat.createTexture(name, w, h, abgr)
     }
 
     override fun delete(texture: Texture) {
-        Minecraft.getInstance().textureManager.release((texture as ModernTexture).location)
+        (texture as ModernTexture).release()
     }
 }
 
@@ -255,7 +247,7 @@ object ModernWorld : WorldView {
     /** 世界渲染结束时的模型矩阵（含镜头转向），由 Fabric 事件每帧设好 */
     internal val basePose = Matrix4f()
 
-    private val camera get() = Minecraft.getInstance().gameRenderer.mainCamera.position
+    private val camera get() = McCompat.cameraPosition()
     override val cameraX: Double get() = camera.x
     override val cameraY: Double get() = camera.y
     override val cameraZ: Double get() = camera.z

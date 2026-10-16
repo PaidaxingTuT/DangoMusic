@@ -96,6 +96,7 @@ object Imm {
         GL20.glVertexAttribPointer(ATTR_POS, 2, GL11.GL_FLOAT, false, 16, 0L)
         GL20.glEnableVertexAttribArray(ATTR_UV)
         GL20.glVertexAttribPointer(ATTR_UV, 2, GL11.GL_FLOAT, false, 16, 8L)
+        McCompat.beforeDraw()
         GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, count)
 
         // 原样换回去：Minecraft 记着它自己绑的是哪个 VAO / 着色器
@@ -206,7 +207,7 @@ void main() {
     fun use(textured: Boolean) {
         ensure()
         GL20.glUseProgram(program)
-        mvp.set(RenderSystem.getProjectionMatrix()).mul(RenderSystem.getModelViewMatrix()).mul(pose)
+        mvp.set(McCompat.projection()).mul(RenderSystem.getModelViewMatrix()).mul(pose)
         matBuf.clear()
         mvp.get(matBuf)
         GL20.glUniformMatrix4fv(locMvp, false, matBuf)

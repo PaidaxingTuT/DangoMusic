@@ -156,17 +156,19 @@ class UiFont(
     private fun genAtlasTexture(atlasW: Int, data: ByteBuffer): Int {
         val prev = Gl.currentTexture()
         val id = Gl.genTexture()
-        GL11.glTexImage2D(
-            GL11.GL_TEXTURE_2D,
-            0,
-            GL11.GL_RED,
-            atlasW,
-            atlasW,
-            0,
-            GL11.GL_RED,
-            GL11.GL_UNSIGNED_BYTE,
-            data
-        )
+        Gl.withDefaultUnpack {
+            GL11.glTexImage2D(
+                GL11.GL_TEXTURE_2D,
+                0,
+                GL11.GL_RED,
+                atlasW,
+                atlasW,
+                0,
+                GL11.GL_RED,
+                GL11.GL_UNSIGNED_BYTE,
+                data
+            )
+        }
         // 图集是 64px，UI 常以 11~16px 绘制，用 mipmap 避免缩小时的锯齿和闪烁
         GL30.glGenerateMipmap(GL11.GL_TEXTURE_2D)
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR_MIPMAP_LINEAR)

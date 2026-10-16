@@ -2,9 +2,9 @@
 
 # Dango Music
 
-在 Minecraft 里听网易云音乐的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
+在 Minecraft 里听网易云音乐的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 · 1.21.11 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
 
-*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1 Fabric & NeoForge) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
+*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1 & 1.21.11 Fabric & NeoForge) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
 
 ## 截图
 
@@ -45,6 +45,8 @@
 | 1.20.1 Forge | `DangoMusic-x.x.x+1.20.1-forge.jar` | Forge 47.x |
 | 1.21.1 Fabric | `DangoMusic-x.x.x+1.21.1-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
 | 1.21.1 NeoForge | `DangoMusic-x.x.x+1.21.1-neoforge.jar` | NeoForge 21.1.x |
+| 1.21.11 Fabric | `DangoMusic-x.x.x+1.21.11-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 1.21.11 NeoForge | `DangoMusic-x.x.x+1.21.11-neoforge.jar` | NeoForge 21.11.x |
 
 1. 把对应的 jar 放进 `.minecraft/mods`（Fabric 版还要放 Fabric API）
 2. 进游戏按 `M`，点左下角扫码登录网易云

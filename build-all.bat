@@ -4,6 +4,8 @@ setlocal
 cd /d "%~dp0"
 if exist dist rmdir /s /q dist
 mkdir dist
+rem Only collect jars of the current version (old builds stay in build\libs)
+for /f "tokens=2 delims==" %%v in ('findstr /b "version=" version.properties') do set "VER=%%v"
 
 echo === 1.8.9 (Forge) ===
 pushd legacy
@@ -15,7 +17,7 @@ if errorlevel 1 (
 )
 popd
 rem "+" in the file name means "join files" to copy, so use xcopy
-for %%f in (legacy\build\libs\DangoMusic-*+1.8.9.jar) do xcopy /y /q "%%f" dist\ >nul
+for %%f in (legacy\build\libs\DangoMusic-%VER%+1.8.9.jar) do xcopy /y /q "%%f" dist\ >nul
 
 rem 1.20.1+ (Fabric / Forge / NeoForge) need JDK 21 (set DANGO_JDK21 to override the default path)
 if not defined DANGO_JDK21 set "DANGO_JDK21=C:\Program Files\Java\jdk-21"
@@ -30,7 +32,7 @@ if errorlevel 1 (
 )
 popd
 for /d %%d in (modern\versions\*) do (
-    for %%f in ("%%d\build\libs\DangoMusic-*+*.jar") do xcopy /y /q "%%f" dist\ >nul
+    for %%f in ("%%d\build\libs\DangoMusic-%VER%+*.jar") do xcopy /y /q "%%f" dist\ >nul
 )
 
 echo.

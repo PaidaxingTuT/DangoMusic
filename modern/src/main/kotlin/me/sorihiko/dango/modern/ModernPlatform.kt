@@ -4,10 +4,8 @@ import me.sorihiko.dango.DangoMusic
 import me.sorihiko.dango.platform.Platform
 import me.sorihiko.dango.platform.PlayerPose
 
-import com.mojang.blaze3d.platform.InputConstants
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ChatScreen
-import net.minecraft.client.gui.screens.Screen
 import org.lwjgl.glfw.GLFW
 
 import java.nio.file.Path
@@ -32,14 +30,21 @@ object ModernPlatform : Platform {
         get() = (mc.mouseHandler.ypos() * mc.window.height / mc.window.screenHeight.coerceAtLeast(1)).toInt()
 
     override fun isMouseDown(button: Int): Boolean =
-        GLFW.glfwGetMouseButton(mc.window.window, button) == GLFW.GLFW_PRESS
+        GLFW.glfwGetMouseButton(McCompat.windowHandle(), button) == GLFW.GLFW_PRESS
 
     override fun isKeyDown(key: Int): Boolean {
         val glfw = KeyMap.toGlfw(key)
-        return glfw > 0 && InputConstants.isKeyDown(mc.window.window, glfw)
+        return glfw > 0 && glfwKey(glfw)
     }
 
-    override val ctrlDown: Boolean get() = Screen.hasControlDown()
+    private fun glfwKey(key: Int): Boolean = GLFW.glfwGetKey(McCompat.windowHandle(), key) == GLFW.GLFW_PRESS
+
+    private val isMac = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
+
+    // Mac 上是 Command 键（和原版 Screen.hasControlDown 一样）
+    override val ctrlDown: Boolean
+        get() = if (isMac) glfwKey(GLFW.GLFW_KEY_LEFT_SUPER) || glfwKey(GLFW.GLFW_KEY_RIGHT_SUPER)
+        else glfwKey(GLFW.GLFW_KEY_LEFT_CONTROL) || glfwKey(GLFW.GLFW_KEY_RIGHT_CONTROL)
 
     override var clipboard: String
         get() = mc.keyboardHandler.clipboard

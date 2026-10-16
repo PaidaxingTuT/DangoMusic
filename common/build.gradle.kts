@@ -4,7 +4,8 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import java.util.Properties
 
 plugins {
-    kotlin("jvm") version "2.0.21" apply false
+    // 版本在 settings.gradle.kts 里按 Gradle 版本选
+    kotlin("jvm") apply false
 }
 
 val modVersion: String = Properties().apply {

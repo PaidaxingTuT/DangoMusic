@@ -182,7 +182,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         val ly = Src(
             mm.get(LyricsModule::class.java),
             deps = mapOf(
-                "distance" to "worldMode", "facePlayer" to "worldMode", "keepAway" to "worldMode", "stayOnScreen" to "worldMode", "spread" to "worldMode",
+                "distance" to "worldMode", "facePlayer" to "worldMode", "keepAway" to "worldMode", "stayOnScreen" to "worldMode", "aboveGround" to "worldMode", "spread" to "worldMode",
                 "glowColor" to "glow", "glowStrength" to "glow", "glowRadius" to "glow",
                 "wiggleFps" to "wiggle", "wiggleAmount" to "wiggle",
                 "flashSize" to "textFlash",
@@ -193,7 +193,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             ),
         )
         val lyrics = mutableListOf(
-            Group("Placement", "In the world", ly.m, false, ly.take(listOf("worldMode", "distance", "facePlayer", "keepAway", "stayOnScreen", "spread", "scale", "smoothFont", "splitLines"))),
+            Group("Placement", "In the world", ly.m, false, ly.take(listOf("worldMode", "distance", "facePlayer", "keepAway", "stayOnScreen", "aboveGround", "spread", "scale", "smoothFont", "splitLines"))),
             Group("Glow", "Deep Glow", ly.m, false, ly.take(listOf("glow", "glowColor", "glowStrength", "glowRadius"))),
             Group("Motion", "Animation", ly.m, false, ly.take(listOf("wiggle", "wiggleFps", "wiggleAmount", "textFlash", "wordPop", "flashSize"))),
         )

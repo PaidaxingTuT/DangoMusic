@@ -1,10 +1,10 @@
 package me.sorihiko.dango.modern
 
-import com.mojang.blaze3d.platform.GlStateManager
 import org.lwjgl.opengl.GL11
 import org.lwjgl.opengl.GL13
 import org.lwjgl.opengl.GL14
 import org.lwjgl.opengl.GL15
+import org.lwjgl.opengl.GL21
 import org.lwjgl.opengl.GL20
 import org.lwjgl.opengl.GL30
 
@@ -13,16 +13,24 @@ import org.lwjgl.opengl.GL30
  *
  * 高版本 Minecraft 改状态前会先查缓存，缓存说"已经是这样了"就不调 GL。
  * 如果我们绕过它直接改 GL，缓存就和实际对不上，之后原版画东西会出错（比如混合没开、绑错贴图）。
+ * （GlStateManager 在不同版本里包名不一样，由 McCompat 里的 typealias 指过去）
  */
 object Gl {
+    /**
+     * 正在往一张透明的离屏贴图上画（1.21.6 起的界面就是这样画、再整张贴上去）。
+     * 这时透明度要按"预乘"的方式叠：alpha 通道用 ONE 而不是 SRC_ALPHA，否则半透明的地方会变淡。
+     */
+    var premultipliedTarget = false
+
     fun blend(on: Boolean) {
         if (on) GlStateManager._enableBlend() else GlStateManager._disableBlend()
         if (on) GL11.glEnable(GL11.GL_BLEND) else GL11.glDisable(GL11.GL_BLEND)
     }
 
     fun blendFunc(srcRgb: Int, dstRgb: Int, srcAlpha: Int, dstAlpha: Int) {
-        GlStateManager._blendFuncSeparate(srcRgb, dstRgb, srcAlpha, dstAlpha)
-        GL14.glBlendFuncSeparate(srcRgb, dstRgb, srcAlpha, dstAlpha)
+        val sa = if (premultipliedTarget && srcAlpha == GL11.GL_SRC_ALPHA) GL11.GL_ONE else srcAlpha
+        GlStateManager._blendFuncSeparate(srcRgb, dstRgb, sa, dstAlpha)
+        GL14.glBlendFuncSeparate(srcRgb, dstRgb, sa, dstAlpha)
     }
 
     fun blendFunc(src: Int, dst: Int) = blendFunc(src, dst, src, dst)
@@ -91,6 +99,30 @@ object Gl {
     }
 
     fun currentTexture(): Int = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D)
+
+    /**
+     * 往贴图里传像素时用默认的读取方式（逐行紧挨着、从头开始读），传完恢复原样。
+     * 原版传贴图时会改这些设置而且不一定改回来（1.21.5 起尤其明显），不重置的话字会变成一堆错位的碎片。
+     */
+    fun <T> withDefaultUnpack(block: () -> T): T {
+        val names = intArrayOf(
+            GL11.GL_UNPACK_ALIGNMENT, GL11.GL_UNPACK_ROW_LENGTH,
+            GL11.GL_UNPACK_SKIP_PIXELS, GL11.GL_UNPACK_SKIP_ROWS,
+        )
+        val saved = IntArray(names.size) { GL11.glGetInteger(names[it]) }
+        val pbo = GL11.glGetInteger(GL21.GL_PIXEL_UNPACK_BUFFER_BINDING)
+        GL15.glBindBuffer(GL21.GL_PIXEL_UNPACK_BUFFER, 0)
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1)
+        GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, 0)
+        GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, 0)
+        GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, 0)
+        try {
+            return block()
+        } finally {
+            for (i in names.indices) GL11.glPixelStorei(names[i], saved[i])
+            GL15.glBindBuffer(GL21.GL_PIXEL_UNPACK_BUFFER, pbo)
+        }
+    }
 }
 
 /**
@@ -134,8 +166,8 @@ class GlState {
     }
 
     fun restore() {
-        GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, drawFbo)
-        GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo)
+        McCompat.bindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, drawFbo)
+        McCompat.bindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo)
         Gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3])
         GL20.glUseProgram(program)
         GL30.glBindVertexArray(vao)

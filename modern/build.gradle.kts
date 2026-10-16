@@ -14,9 +14,9 @@ import java.util.Properties
  *   versions/<名字>/   加载器入口（Fabric / Forge / NeoForge）和 mod 信息文件
  */
 plugins {
-    id("dev.architectury.loom") version "1.10-SNAPSHOT" apply false
-    kotlin("jvm") version "2.0.21" apply false
-    id("com.gradleup.shadow") version "8.3.6" apply false
+    id("dev.architectury.loom") version "1.13-SNAPSHOT" apply false
+    kotlin("jvm") version "2.2.21" apply false
+    id("com.gradleup.shadow") version "9.2.2" apply false
 }
 
 // 版本号统一写在根目录的 version.properties
@@ -106,7 +106,7 @@ subprojects {
 
     // 先把依赖打进去、改包名（避免和其它 mod 冲突），再交给 Loom 转成运行时用的名字
     val shadowJar = tasks.named<ShadowJar>("shadowJar") {
-        configurations = listOf(shade)
+        configurations.set(listOf(shade))
         archiveClassifier.set("dev-shadow")
         relocate("kotlin", "me.sorihiko.dango.shadow.kotlin")
         relocate("org.intellij.lang.annotations", "me.sorihiko.dango.shadow.annotations.intellij")

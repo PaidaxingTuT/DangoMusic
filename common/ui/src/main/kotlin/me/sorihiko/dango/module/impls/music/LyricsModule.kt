@@ -36,6 +36,12 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.tan
 
+/** "Above ground"：歌词中心最低在眼睛下面多少格 */
+private const val GROUND_MARGIN = 0.5
+
+/** Stay on screen 弹簧的快慢（越大跟得越紧；12 大约 0.3 秒回到位） */
+private const val SPRING = 12.0
+
 /**
  * 歌词：内置播放器放歌时，从网易云取（逐字）歌词，一句句以动画漂浮在世界里。
  * 另外负责左上角原版风格的"正在播放"（Now playing / Cover）。
@@ -103,6 +109,9 @@ class LyricsModule : Module() {
     @ModuleValue("Stay on screen", "Lyrics glide back into view when you turn away, so they never leave the screen")
     private val stayOnScreen = BooleanValue(false)
 
+    @ModuleValue("Above ground", "Lyrics never appear below your eyes, so they don't sink into the ground")
+    private val aboveGround = BooleanValue(false)
+
     @ModuleValue("Spread", "How far left or right each line can appear (degrees)")
     private val spread = FloatValue(0f, 60f, 30f, 0)
 
@@ -144,6 +153,9 @@ class LyricsModule : Module() {
         val charTimes: LongArray = LongArray(0),
     ) {
         var fadeStartNanos = 0L
+        /** Stay on screen 往回拉时的角速度（度 / 秒），用弹簧算，起步和停下都是平滑的 */
+        var vYaw = 0.0
+        var vPitch = 0.0
         /** 暂停后恢复播放时重新出现的这句：用一个短淡入代替逐字出现 */
         var resumedAt = 0L
     }
@@ -369,6 +381,13 @@ class LyricsModule : Module() {
         return times.toLongArray()
     }
 
+    /**
+     * "Above ground"：歌词中心最低只到眼睛下面 [GROUND_MARGIN] 格（站在平地上时离地还有一格多），
+     * 换算成距离 [d] 处最多能往下偏多少度（原版 pitch 向下为正）
+     */
+    private fun maxPitch(d: Double): Float =
+        Math.toDegrees(asin((GROUND_MARGIN / d).coerceIn(0.0, 1.0))).toFloat()
+
     private fun spawn(line: LyricLine, nextMs: Long): Floating {
         val text = line.text
         val startMs = line.timeMs
@@ -381,10 +400,11 @@ class LyricsModule : Module() {
         val player = DangoClient.platform.player
         if (player == null) return Floating(lines, startMs, reveal, 0.0, 0.0, 0.0, 0f, 0f, ct)
         val yaw = player.yaw + (random.nextFloat() * 2f - 1f) * spread.value
-        val pitch = (player.pitch - 3f - random.nextFloat() * 10f).coerceIn(-60f, 30f)
+        val d = distance.value.toDouble()
+        var pitch = (player.pitch - 3f - random.nextFloat() * 10f).coerceIn(-60f, 30f)
+        if (aboveGround.get()) pitch = min(pitch, maxPitch(d))
         val yr = Math.toRadians(yaw.toDouble())
         val pr = Math.toRadians(pitch.toDouble())
-        val d = distance.value.toDouble()
         val dx = -sin(yr) * cos(pr)
         val dy = -sin(pr)
         val dz = cos(yr) * cos(pr)
@@ -555,6 +575,13 @@ class LyricsModule : Module() {
 
     private var keepNanos = 0L
 
+    /**
+     * "Above ground" 的最低高度，平滑地跟着镜头走：
+     * 用每帧插值过的镜头位置（不是一秒 20 次跳变的玩家位置），往上慢慢跟、往下快一点跟，
+     * 跳起来时字只会被柔和地托起一点，不会一顿一顿地抽。
+     */
+    private var groundFloor = Double.NaN
+
     private fun wrapDegrees(d: Double): Double {
         var v = d % 360.0
         if (v >= 180.0) v -= 360.0
@@ -566,6 +593,9 @@ class LyricsModule : Module() {
      * "Stay on screen"：歌词（连同字的宽度）超出视野时，沿着离视线最近的方向滑回屏幕边上。
      * 用视线方向的偏角（左右 / 上下）判断，视野大小按设置里的 FOV 和窗口宽高比算；离镜头的距离不变。
      * 每帧在画之前做一次，发光层和字本身用的是同一个位置。
+     *
+     * 往回拉用的是"临界阻尼弹簧"：有速度、会慢慢加速和减速，不会一碰到边就突然开始动、一回来就突然停，
+     * 跳跃 / 飞行这种上下来回的时候也是顺的。"Above ground" 的最低高度也算成一个边界交给同一个弹簧。
      */
     private fun keepOnScreen() {
         val now = System.nanoTime()
@@ -576,11 +606,20 @@ class LyricsModule : Module() {
         val player = platform.player ?: return
         val world = DangoClient.gfx.world
 
+        if (aboveGround.get()) {
+            val target = world.cameraY - GROUND_MARGIN
+            groundFloor = if (groundFloor.isNaN()) target else {
+                val tau = if (target > groundFloor) 0.3 else 0.15
+                groundFloor + (target - groundFloor) * (1.0 - exp(-dt / tau))
+            }
+        } else {
+            groundFloor = Double.NaN
+        }
+
         val vHalf = platform.fov / 2.0
         val aspect = platform.windowWidth.toDouble() / platform.windowHeight.coerceAtLeast(1)
         val hHalf = Math.toDegrees(atan(tan(Math.toRadians(vHalf)) * aspect))
         val s = 0.03 * scale.value * (distance.value / 6.5)
-        val k = 1.0 - exp(-dt / 0.12)        // 滑回去的快慢（时间常数 0.12 秒）
 
         fun follow(f: Floating) {
             val rx = f.x - world.cameraX
@@ -599,12 +638,40 @@ class LyricsModule : Module() {
             val curPitch = Math.toDegrees(asin((-ry / len).coerceIn(-1.0, 1.0)))
             val dYaw = wrapDegrees(curYaw - player.yaw)
             val dPitch = curPitch - player.pitch
-            val tYaw = dYaw.coerceIn(-hLim, hLim)
-            val tPitch = dPitch.coerceIn(-vLim, vLim)
-            if (tYaw == dYaw && tPitch == dPitch) return
 
-            val newYaw = player.yaw + dYaw + (tYaw - dYaw) * k
-            val newPitch = (player.pitch + dPitch + (tPitch - dPitch) * k).coerceIn(-89.0, 89.0)
+            // 往下最多到哪：屏幕下边，以及（Above ground）不低于地面高度，哪个更靠上用哪个
+            var lowLim = vLim
+            if (!groundFloor.isNaN()) {
+                val floorPitch = Math.toDegrees(asin(((world.cameraY - groundFloor) / len).coerceIn(-1.0, 1.0)))
+                lowLim = min(lowLim, floorPitch - player.pitch)
+            }
+            val tYaw = dYaw.coerceIn(-hLim, hLim)
+            val tPitch = if (lowLim >= -vLim) dPitch.coerceIn(-vLim, lowLim) else lowLim
+
+            // 偏出去多少（在边界以内就是 0）
+            val eYaw = dYaw - tYaw
+            val ePitch = dPitch - tPitch
+            if (eYaw == 0.0 && ePitch == 0.0 && abs(f.vYaw) < 0.05 && abs(f.vPitch) < 0.05) {
+                f.vYaw = 0.0
+                f.vPitch = 0.0
+                return
+            }
+
+            // 临界阻尼弹簧，分成小步算（帧率低时也稳定）
+            var moveYaw = 0.0
+            var movePitch = 0.0
+            var left = dt
+            while (left > 1e-6) {
+                val h = min(left, 1.0 / 240.0)
+                left -= h
+                f.vYaw += (-SPRING * SPRING * (eYaw - moveYaw) - 2.0 * SPRING * f.vYaw) * h
+                f.vPitch += (-SPRING * SPRING * (ePitch - movePitch) - 2.0 * SPRING * f.vPitch) * h
+                moveYaw += f.vYaw * h
+                movePitch += f.vPitch * h
+            }
+
+            val newYaw = curYaw + moveYaw
+            val newPitch = (curPitch + movePitch).coerceIn(-89.0, 89.0)
             val yr = Math.toRadians(newYaw)
             val pr = Math.toRadians(newPitch)
             f.x = world.cameraX - sin(yr) * cos(pr) * len
