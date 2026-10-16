@@ -130,9 +130,7 @@ object ModernGfx : Gfx {
 /** 临时换成自己的投影矩阵（画屏幕上的东西用），[restore] 换回原来的 */
 internal class Projection private constructor() {
     fun restore() {
-        val mv = RenderSystem.getModelViewStack()
-        mv.popPose()
-        RenderSystem.applyModelViewMatrix()
+        McCompat.popModelView()
         RenderSystem.restoreProjectionMatrix()
     }
 
@@ -141,10 +139,7 @@ internal class Projection private constructor() {
         fun screen(w: Float, h: Float): Projection {
             RenderSystem.backupProjectionMatrix()
             RenderSystem.setProjectionMatrix(Matrix4f().setOrtho(0f, w, h, 0f, 1000f, 3000f), VertexSorting.ORTHOGRAPHIC_Z)
-            val mv = RenderSystem.getModelViewStack()
-            mv.pushPose()
-            mv.setIdentity()
-            RenderSystem.applyModelViewMatrix()
+            McCompat.pushIdentityModelView()
             return Projection()
         }
     }

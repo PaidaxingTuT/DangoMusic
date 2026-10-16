@@ -17,31 +17,21 @@ popd
 rem "+" in the file name means "join files" to copy, so use xcopy
 for %%f in (legacy\build\libs\DangoMusic-*+1.8.9.jar) do xcopy /y /q "%%f" dist\ >nul
 
-rem Fabric versions need JDK 21 (set DANGO_JDK21 to override the default path)
+rem 1.20.1+ (Fabric / Forge / NeoForge) need JDK 21 (set DANGO_JDK21 to override the default path)
 if not defined DANGO_JDK21 set "DANGO_JDK21=C:\Program Files\Java\jdk-21"
 echo.
-echo === 1.20.1 (Fabric) ===
+echo === 1.20.1+ (Fabric / Forge / NeoForge) ===
 pushd modern
 call gradlew.bat "-Dorg.gradle.java.home=%DANGO_JDK21%" build
 if errorlevel 1 (
     popd
-    echo 1.20.1 build failed
+    echo Modern build failed
     exit /b 1
 )
 popd
-for %%f in (modern\build\libs\DangoMusic-*+1.20.1-fabric.jar) do xcopy /y /q "%%f" dist\ >nul
-
-echo.
-echo === 1.20.1 (Forge) ===
-pushd forge
-call gradlew.bat "-Dorg.gradle.java.home=%DANGO_JDK21%" build
-if errorlevel 1 (
-    popd
-    echo 1.20.1 Forge build failed
-    exit /b 1
+for /d %%d in (modern\versions\*) do (
+    for %%f in ("%%d\build\libs\DangoMusic-*+*.jar") do xcopy /y /q "%%f" dist\ >nul
 )
-popd
-for %%f in (forge\build\libs\DangoMusic-*+1.20.1-forge.jar) do xcopy /y /q "%%f" dist\ >nul
 
 echo.
 echo Done. Jars in dist\:

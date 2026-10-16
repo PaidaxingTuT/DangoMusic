@@ -6,7 +6,6 @@ import me.sorihiko.dango.DangoMusic
 import me.sorihiko.dango.events.TickEvent
 import me.sorihiko.dango.events.WorldRenderEndEvent
 
-import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.Minecraft
 
 /** Fabric / Forge 入口调用：启动和事件转发（两个加载器共用） */
@@ -35,20 +34,17 @@ object ModernDango {
      * 画的期间把原版的视图矩阵设成单位矩阵，镜头转向只算这一次。
      */
     @JvmStatic
-    fun worldRenderEnd(partialTicks: Float) {
+    fun worldRenderEnd() {
         val camera = Minecraft.getInstance().gameRenderer.mainCamera
         ModernWorld.basePose.identity()
             .rotateX(Math.toRadians(camera.xRot.toDouble()).toFloat())
             .rotateY(Math.toRadians(camera.yRot.toDouble() + 180.0).toFloat())
-        val modelView = RenderSystem.getModelViewStack()
-        modelView.pushPose()
-        modelView.setIdentity()
-        RenderSystem.applyModelViewMatrix()
+        McCompat.pushIdentityModelView()
         try {
-            DangoMusic.callEvent(WorldRenderEndEvent(partialTicks))
+            // partialTicks 目前没有地方用到，各版本拿它的写法又不一样，就不传了
+            DangoMusic.callEvent(WorldRenderEndEvent(0f))
         } finally {
-            modelView.popPose()
-            RenderSystem.applyModelViewMatrix()
+            McCompat.popModelView()
         }
     }
 }

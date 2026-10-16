@@ -2,9 +2,9 @@
 
 # Dango Music
 
-在 Minecraft 里听网易云音乐的 mod（Forge 1.8.9 / Fabric 1.20.1）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
+在 Minecraft 里听网易云音乐的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
 
-*A Minecraft mod (Forge 1.8.9 / Fabric 1.20.1) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
+*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1 Fabric & NeoForge) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
 
 ## 截图
 
@@ -41,16 +41,19 @@
 | 版本 | 文件 | 需要 |
 |---|---|---|
 | 1.8.9 | `DangoMusic-x.x.x+1.8.9.jar` | Forge 1.8.9（11.15.1.2318），或支持 Forge mod 的客户端（如 Lunar） |
-| 1.20.1 | `DangoMusic-x.x.x+1.20.1.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 1.20.1 Fabric | `DangoMusic-x.x.x+1.20.1-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 1.20.1 Forge | `DangoMusic-x.x.x+1.20.1-forge.jar` | Forge 47.x |
+| 1.21.1 Fabric | `DangoMusic-x.x.x+1.21.1-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 1.21.1 NeoForge | `DangoMusic-x.x.x+1.21.1-neoforge.jar` | NeoForge 21.1.x |
 
-1. 把对应的 jar 放进 `.minecraft/mods`（1.20.1 还要放 Fabric API）
+1. 把对应的 jar 放进 `.minecraft/mods`（Fabric 版还要放 Fabric API）
 2. 进游戏按 `M`，点左下角扫码登录网易云
 
 配置、登录凭证、缓存都存在 `.minecraft/config/dangomusic/`，各个版本通用。
 
 ## 构建
 
-需要 JDK 8（1.8.9）和 JDK 21（1.20.1）。`build-all.bat` 默认用 `C:\Program Files\Java\jdk-21`，
+需要 JDK 8（1.8.9）和 JDK 21（1.20.1 以上）。`build-all.bat` 默认用 `C:\Program Files\Java\jdk-21`，
 装在别处的话先设置环境变量 `DANGO_JDK21`。
 
 ```bash
@@ -72,7 +75,10 @@ version.properties   版本号（所有 Minecraft 版本共用）
 common/core          核心：模块、设置、网易云接口、播放器、一起听歌（不依赖 Minecraft）
 common/ui            界面：播放器窗口、歌词、Song card、灵动岛（只通过 Gfx / Platform 接口画）
 legacy/              Forge 1.8.9 平台层：实现 Gfx / Platform，OpenGL 2 着色器、字体
-modern/              Fabric 高版本平台层（目前 1.20.1）：OpenGL 3.2 core 着色器、字体
+modern/              1.20.1 以上的平台层（一个 Gradle 项目，每个版本 + 加载器一个子项目）
+  src/main/            所有高版本共用：OpenGL 3.2 core 着色器、字体、按键、播放器界面
+  src/mc<版本>/        某个 Minecraft 版本专用的几处写法
+  versions/<版本-加载器>/  Fabric / Forge / NeoForge 入口和 mod 信息文件
 ```
 
 `common` 不单独构建，由各平台层用 `includeBuild("../common")` 引进去，打进同一个 jar。

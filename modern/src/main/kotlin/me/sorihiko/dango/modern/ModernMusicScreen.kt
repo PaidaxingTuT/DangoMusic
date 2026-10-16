@@ -11,7 +11,7 @@ import net.minecraft.network.chat.Component
 class ModernMusicScreen(
     /** 关闭后回到哪个界面（null = 回到游戏） */
     private val parent: Screen?,
-) : Screen(Component.literal("Dango Music")) {
+) : CompatScreen(Component.literal("Dango Music")) {
 
     private val screen = DangoClient.newMusicScreen { minecraft?.setScreen(parent) }
 
@@ -41,7 +41,8 @@ class ModernMusicScreen(
         return true
     }
 
-    override fun mouseScrolled(mouseX: Double, mouseY: Double, delta: Double): Boolean {
+    /** 滚轮（各版本的事件参数不一样，由 [CompatScreen] 统一成竖直方向的格数） */
+    override fun onScroll(delta: Double): Boolean {
         // 1.8.9 每格滚轮是 ±120；这里换算成一样的数
         val wheel = (delta * 120).toInt()
         if (wheel != 0) screen.scroll(wheel, ModernPlatform.mouseX, ModernPlatform.mouseY)
