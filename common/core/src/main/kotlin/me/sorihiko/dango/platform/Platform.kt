@@ -47,6 +47,9 @@ interface Platform {
 
     val fps: Int
 
+    /** 设置里的视野（FOV，竖直方向，角度） */
+    val fov: Float
+
     /** 到服务器的延迟（毫秒）；单人游戏或拿不到时是 0 */
     val pingMs: Int
 

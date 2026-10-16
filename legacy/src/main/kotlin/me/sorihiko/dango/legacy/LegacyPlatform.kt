@@ -48,6 +48,8 @@ object LegacyPlatform : Platform {
 
     override val fps: Int get() = Minecraft.getDebugFPS()
 
+    override val fov: Float get() = mc.gameSettings.fovSetting
+
     override val pingMs: Int
         get() {
             val p = mc.thePlayer ?: return 0

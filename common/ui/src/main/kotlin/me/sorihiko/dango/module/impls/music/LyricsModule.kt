@@ -25,12 +25,16 @@ import java.util.Random
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.atan
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tan
 
 /**
  * 歌词：内置播放器放歌时，从网易云取（逐字）歌词，一句句以动画漂浮在世界里。
@@ -96,6 +100,9 @@ class LyricsModule : Module() {
     @ModuleValue("Keep away", "Lyrics back off when you walk or sprint into them")
     private val keepAway = BooleanValue(true)
 
+    @ModuleValue("Stay on screen", "Lyrics glide back into view when you turn away, so they never leave the screen")
+    private val stayOnScreen = BooleanValue(false)
+
     @ModuleValue("Spread", "How far left or right each line can appear (degrees)")
     private val spread = FloatValue(0f, 60f, 30f, 0)
 
@@ -132,7 +139,7 @@ class LyricsModule : Module() {
         val startMs: Long,
         val revealMs: Long,
         var x: Double, var y: Double, var z: Double,
-        val yaw: Float, val pitch: Float,
+        var yaw: Float, var pitch: Float,
         /** 每个非空白字符出现的时间（相对这句开始，毫秒），按词闪出时用 */
         val charTimes: LongArray = LongArray(0),
     ) {
@@ -267,6 +274,8 @@ class LyricsModule : Module() {
                 }
             }
         }
+
+        if (worldMode.get() && !textFlash.get()) keepOnScreen()
 
         val gfx = DangoClient.gfx
         val deepGlow = gfx.glow
@@ -540,6 +549,74 @@ class LyricsModule : Module() {
         for (g in glyphs) withWiggle(g, seed, frame) { drawGlyph(g.c, g.x, g.y, textRgb, g.a, smooth, !glowPass) }
 
         if (smooth) DangoClient.gfx.text.endSmooth()
+    }
+
+    // ---------------------------------------------------------------- 不跑出屏幕
+
+    private var keepNanos = 0L
+
+    private fun wrapDegrees(d: Double): Double {
+        var v = d % 360.0
+        if (v >= 180.0) v -= 360.0
+        if (v < -180.0) v += 360.0
+        return v
+    }
+
+    /**
+     * "Stay on screen"：歌词（连同字的宽度）超出视野时，沿着离视线最近的方向滑回屏幕边上。
+     * 用视线方向的偏角（左右 / 上下）判断，视野大小按设置里的 FOV 和窗口宽高比算；离镜头的距离不变。
+     * 每帧在画之前做一次，发光层和字本身用的是同一个位置。
+     */
+    private fun keepOnScreen() {
+        val now = System.nanoTime()
+        val dt = if (keepNanos == 0L) 0.016 else ((now - keepNanos) / 1e9).coerceIn(0.0, 0.1)
+        keepNanos = now
+        if (!stayOnScreen.get()) return
+        val platform = DangoClient.platform
+        val player = platform.player ?: return
+        val world = DangoClient.gfx.world
+
+        val vHalf = platform.fov / 2.0
+        val aspect = platform.windowWidth.toDouble() / platform.windowHeight.coerceAtLeast(1)
+        val hHalf = Math.toDegrees(atan(tan(Math.toRadians(vHalf)) * aspect))
+        val s = 0.03 * scale.value * (distance.value / 6.5)
+        val k = 1.0 - exp(-dt / 0.12)        // 滑回去的快慢（时间常数 0.12 秒）
+
+        fun follow(f: Floating) {
+            val rx = f.x - world.cameraX
+            val ry = f.y - world.cameraY
+            val rz = f.z - world.cameraZ
+            val len = sqrt(rx * rx + ry * ry + rz * rz)
+            if (len < 1e-4) return
+
+            // 字本身占的角度：留出一半宽 / 高，再多留 2 度边距
+            val halfW = Math.toDegrees(atan2(f.lines.maxOf { strW(it) } * s / 2.0, len))
+            val halfH = Math.toDegrees(atan2(f.lines.size * 11.0 * s / 2.0, len))
+            val hLim = max(0.0, hHalf - halfW - 2.0)
+            val vLim = max(0.0, vHalf - halfH - 2.0)
+
+            val curYaw = Math.toDegrees(atan2(-rx, rz))
+            val curPitch = Math.toDegrees(asin((-ry / len).coerceIn(-1.0, 1.0)))
+            val dYaw = wrapDegrees(curYaw - player.yaw)
+            val dPitch = curPitch - player.pitch
+            val tYaw = dYaw.coerceIn(-hLim, hLim)
+            val tPitch = dPitch.coerceIn(-vLim, vLim)
+            if (tYaw == dYaw && tPitch == dPitch) return
+
+            val newYaw = player.yaw + dYaw + (tYaw - dYaw) * k
+            val newPitch = (player.pitch + dPitch + (tPitch - dPitch) * k).coerceIn(-89.0, 89.0)
+            val yr = Math.toRadians(newYaw)
+            val pr = Math.toRadians(newPitch)
+            f.x = world.cameraX - sin(yr) * cos(pr) * len
+            f.y = world.cameraY - sin(pr) * len
+            f.z = world.cameraZ + cos(yr) * cos(pr) * len
+            // 不朝向镜头时，字的朝向跟着一起转，免得斜着看
+            f.yaw = (f.yaw + wrapDegrees(newYaw - curYaw)).toFloat()
+            f.pitch = (f.pitch + (newPitch - curPitch)).toFloat().coerceIn(-90f, 90f)
+        }
+
+        active?.let { follow(it) }
+        fading.forEach { follow(it) }
     }
 
     private fun drawWorld(partialTicks: Float, songNow: Long, lyrics: Lyrics?, beat: Float) {

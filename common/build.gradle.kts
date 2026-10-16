@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 import java.util.Properties
@@ -22,9 +23,20 @@ subprojects {
         maven("https://libraries.minecraft.net")
     }
 
-    // 编译成 Java 8 字节码：1.8.9 跑在 Java 8 上，高版本的 Java 也能直接用
+    // 编译成 Java 8 字节码：1.8.9 跑在 Java 8 上，高版本的 Java 也能直接用。
+    // 不用 toolchain：legacy 用 JDK 8 构建、modern 用 JDK 21 构建，都直接用当前这个 JDK
     extensions.configure<KotlinJvmProjectExtension> {
-        jvmToolchain(8)
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_1_8)
+        }
+    }
+    tasks.withType<JavaCompile>().configureEach {
+        if (JavaVersion.current().isJava9Compatible) {
+            options.release.set(8)
+        } else {
+            sourceCompatibility = "1.8"
+            targetCompatibility = "1.8"
+        }
     }
 
     dependencies {
