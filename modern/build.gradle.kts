@@ -114,6 +114,9 @@ subprojects {
         relocate("javazoom", "me.sorihiko.dango.shadow.javazoom")
         relocate("com.google.zxing", "me.sorihiko.dango.shadow.zxing")
         exclude("module-info.class", "META-INF/versions/**", "META-INF/*.kotlin_module")
+        // META-INF/versions 已经去掉了，就不能再声明 Multi-Release，
+        // 否则 Forge 1.20.1 加载 jar 时找不到这个目录直接崩溃（Shadow 9 默认会加这一行）
+        addMultiReleaseAttribute.set(false)
     }
 
     tasks.named<RemapJarTask>("remapJar") {
