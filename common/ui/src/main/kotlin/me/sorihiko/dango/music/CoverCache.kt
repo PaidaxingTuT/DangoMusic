@@ -18,11 +18,22 @@ import kotlin.math.min
 
 /**
  * 多张封面的缓存（封面墙、列表缩略图用）：
- * 后台下载 + 裁成正方形，渲染线程上传成纹理，最多保留 [MAX] 张，最久没用的先删。
+ * 后台下载 + 裁成正方形，渲染线程上传成纹理。
+ *
+ * - 纹理大约保留 [MAX] 张，超出时删最久没画过的；但最近几帧还在画的不删
+ *   （排行榜 + 大歌单一屏的封面可能比 [MAX] 多，以前会一边删一边重新下载，来回折腾）。
+ * - 下载好的图片另外在内存里多留一些（[MAX_SOURCES] 张）：纹理删了以后再滚回来，直接重新上传，不用再下载。
  */
 object CoverCache {
 
-    private const val MAX = 64
+    /** 纹理大约保留多少张（128×128，一张 64 KB 显存） */
+    private const val MAX = 160
+    /** 下载好的图片保留多少张（一张 64 KB 内存） */
+    private const val MAX_SOURCES = 400
+    /** 最近这么久（毫秒）里画过的封面算"正在用"，超出上限也不删 */
+    private const val IN_USE_MS = 500L
+    /** 每次 upload() 最多上传几张 */
+    private const val UPLOADS_PER_CALL = 8
     /**
      * 下载线程：后加的任务先做（屏幕上正在看的封面优先，滚过去的旧请求排后面）
      */
@@ -42,38 +53,56 @@ object CoverCache {
 
     // 只在渲染线程访问
     private val textures = object : LinkedHashMap<String, Texture>(16, 0.75f, true) {}
-    /** 已下载的正方形原图（做圆角版本用），和纹理一起淘汰 */
-    private val sources = HashMap<String, BufferedImage>()
+    /** 每张纹理最后一次被画的时间（毫秒）。按时间算，不按帧：upload() 每帧可能被调好几次 */
+    private val lastUsed = HashMap<String, Long>()
+    private var now = 0L
+    /** 已下载的正方形原图：纹理删了以后重新上传 / 做圆角版本用。按最久没用的先删 */
+    private val sources = object : LinkedHashMap<String, BufferedImage>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BufferedImage>) = size > MAX_SOURCES
+    }
     private val roundQueued = HashSet<String>()
 
     /** 圆角半径占边长的比例（Song card / 灵动岛用） */
     private const val ROUND = 0.2f
 
-    /** 渲染线程每帧调用一次：把下载好的图片上传成纹理，超出上限就删掉最久没用的 */
+    /** 渲染线程每帧调用：把下载好的图片上传成纹理，超出上限就删掉最久没画的 */
     fun upload() {
-        while (true) {
+        now = System.currentTimeMillis()
+        // 一次最多传几张，一下子滚出很多封面时不会卡一下
+        for (i in 0 until UPLOADS_PER_CALL) {
             val (key, img) = ready.poll() ?: break
             val tex = DangoClient.gfx.textures.upload("dango_cover_c", img)
             textures.put(key, tex)?.let { DangoClient.gfx.textures.delete(it) }
+            lastUsed[key] = now
             if (ROUND_SUFFIX !in key) sources[key] = img
         }
+        // 最久没画的排在最前面；它要是最近还在画，说明全都在用，先不删（下一帧再看）
         while (textures.size > MAX) {
             val eldest = textures.entries.iterator().next()
+            if (now - (lastUsed[eldest.key] ?: 0L) <= IN_USE_MS) break
             DangoClient.gfx.textures.delete(eldest.value)
             requested.remove(eldest.key)
             roundQueued.remove(eldest.key)
-            sources.remove(eldest.key)
+            lastUsed.remove(eldest.key)
             textures.remove(eldest.key)
         }
     }
 
     /** 取封面；还没有就去下载，先返回 null（画占位） */
     fun get(key: String, url: String): Texture? {
-        textures[key]?.let { return it }
+        textures[key]?.let {
+            lastUsed[key] = now
+            return it
+        }
         if (url.isEmpty()) return null
         val failed = failedAt[key]
         if (failed != null && System.currentTimeMillis() - failed < RETRY_MS) return null
         if (!requested.add(key)) return null
+        // 以前下载过、只是纹理被删了：直接拿内存里的图重新上传（下一帧就有）
+        sources[key]?.let {
+            ready.add(key to it)
+            return null
+        }
         worker.execute {
             var ok = false
             var why = ""
@@ -112,7 +141,10 @@ object CoverCache {
     /** 圆角版封面（渲染线程调用）：原图下好后再生成一张四角透明的纹理。ratio = 圆角半径 / 边长 */
     fun rounded(key: String, url: String, ratio: Float = ROUND): Texture? {
         val rk = key + ROUND_SUFFIX + (ratio * 100).toInt()
-        textures[rk]?.let { return it }
+        textures[rk]?.let {
+            lastUsed[rk] = now
+            return it
+        }
         get(key, url)                                  // 确保原图在下载 / 已缓存
         val src = sources[key] ?: return null
         if (roundQueued.add(rk)) {

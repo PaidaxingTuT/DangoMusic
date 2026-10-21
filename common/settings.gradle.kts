@@ -7,7 +7,12 @@ pluginManagement {
     }
     // legacy/ 用 Gradle 7（只能用老的 Kotlin 插件），modern/ 用 Gradle 9（要新的）。
     // 必须和引用这里的那一边用同一个 Kotlin 版本
-    val kotlinVersion = if (org.gradle.util.GradleVersion.current() >= org.gradle.util.GradleVersion.version("9.0")) "2.2.21" else "2.0.21"
+    val gradleVersion = org.gradle.util.GradleVersion.current()
+    val kotlinVersion = when {
+        gradleVersion >= org.gradle.util.GradleVersion.version("9.5") -> "2.3.21"   // modern26/（Java 25）
+        gradleVersion >= org.gradle.util.GradleVersion.version("9.0") -> "2.2.21"   // modern/
+        else -> "2.0.21"                                                              // legacy/
+    }
     plugins {
         id("org.jetbrains.kotlin.jvm") version kotlinVersion
     }

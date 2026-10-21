@@ -27,6 +27,9 @@ import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
 import net.minecraft.world.phys.Vec3
 import org.joml.Matrix4f
+import net.minecraft.client.gui.Font
+import net.minecraft.client.renderer.LightTexture
+import org.joml.Matrix4fc
 import org.lwjgl.BufferUtils
 import org.lwjgl.opengl.GL11
 import org.lwjgl.opengl.GL15
@@ -39,6 +42,17 @@ import java.lang.reflect.Modifier
 
 /** 1.21.5 起 GlStateManager 搬到了 opengl 包 */
 internal typealias GlStateManager = com.mojang.blaze3d.opengl.GlStateManager
+
+/** 同步原版 GlStateManager 记的混合 / 颜色写入状态（各版本参数不一样） */
+internal object GlCache {
+    fun blend(on: Boolean) {
+        if (on) GlStateManager._enableBlend() else GlStateManager._disableBlend()
+    }
+
+    fun colorMask(r: Boolean, g: Boolean, b: Boolean, a: Boolean) {
+        GlStateManager._colorMask(r, g, b, a)
+    }
+}
 
 /**
  * 1.21.11 专用的几处写法（同一件事在不同 Minecraft 版本里 API 不一样）。
@@ -196,6 +210,46 @@ internal object McCompat {
     fun cameraPosition(): Vec3 = mc.gameRenderer.mainCamera.position()
 
     fun windowHandle(): Long = mc.window.handle()
+
+    /** 鼠标键 [button]（GLFW 编号：0 左、1 右、2 中）是否按着 */
+    fun isMouseDown(button: Int): Boolean =
+        org.lwjgl.glfw.GLFW.glfwGetMouseButton(windowHandle(), button) == org.lwjgl.glfw.GLFW.GLFW_PRESS
+
+    /** 键盘键（GLFW 键码）是否按着 */
+    fun isGlfwKeyDown(key: Int): Boolean =
+        org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle(), key) == org.lwjgl.glfw.GLFW.GLFW_PRESS
+
+    /** 原版视图矩阵的当前值（[Fixed] 算 MVP 用） */
+    fun modelView(): Matrix4fc = RenderSystem.getModelViewMatrix()
+
+    /** 用原版字体画一段像素字（[pose] 是模型矩阵），画在当前绑定的帧缓冲上 */
+    fun drawText(text: String, x: Float, y: Float, argb: Int, pose: Matrix4f) {
+        val mc = Minecraft.getInstance()
+        val buffers = mc.renderBuffers().bufferSource()
+        mc.font.drawInBatch(
+            text, x, y, argb, false, pose, buffers,
+            Font.DisplayMode.SEE_THROUGH, 0, LightTexture.FULL_BRIGHT,
+        )
+        vanillaDraw { buffers.endBatch() }
+    }
+
+    fun currentScreen(): Screen? = Minecraft.getInstance().screen
+
+    fun setScreen(screen: Screen?) {
+        Minecraft.getInstance().setScreen(screen)
+    }
+
+    /** 能不能用 OpenGL 画（26.x 起可以选 Vulkan，那时我们画不了） */
+    val glAvailable: Boolean get() = true
+
+    /** 原版开始画界面之前（只有 26.x 用到） */
+    fun beforeGui() {}
+
+    /** 不能用 OpenGL 时提示玩家（这些版本一定能用） */
+    fun notifyNoGl(again: Boolean = false) {}
+
+    /** 绕开 Java 25 编译器 bug（只有 26.x 用 Java 25，这些版本不用） */
+    fun installJitWorkaround() {}
 
     // ------------------------------------------------------------ 贴图
 

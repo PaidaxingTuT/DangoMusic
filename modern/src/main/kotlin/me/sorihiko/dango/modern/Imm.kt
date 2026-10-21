@@ -1,6 +1,5 @@
 package me.sorihiko.dango.modern
 
-import com.mojang.blaze3d.systems.RenderSystem
 import org.joml.Matrix4f
 import org.lwjgl.BufferUtils
 import org.lwjgl.opengl.GL11
@@ -57,11 +56,25 @@ object Imm {
             corner = 0
             // 四边形 → 两个三角形 (0,1,2) (0,2,3)
             ensure(count + 6)
-            for (i in intArrayOf(0, 1, 2, 0, 2, 3)) {
-                System.arraycopy(quad, i * 4, data, count * 4, 4)
-                count++
-            }
+            putCorner(0); putCorner(1); putCorner(2)
+            putCorner(0); putCorner(2); putCorner(3)
         }
+    }
+
+    /**
+     * 把四边形的第 [i] 个角抄进顶点数组。
+     * 逐个赋值，不用临时数组和 System.arraycopy：Java 25 的 C2 编译器在优化原来那种写法
+     * （被内联进画字的循环里）时会自己崩掉，整个游戏直接闪退。
+     */
+    private fun putCorner(i: Int) {
+        val src = i * 4
+        val dst = count * 4
+        val d = data
+        d[dst] = quad[src]
+        d[dst + 1] = quad[src + 1]
+        d[dst + 2] = quad[src + 2]
+        d[dst + 3] = quad[src + 3]
+        count++
     }
 
     private fun ensure(vertices: Int) {
@@ -207,7 +220,7 @@ void main() {
     fun use(textured: Boolean) {
         ensure()
         GL20.glUseProgram(program)
-        mvp.set(McCompat.projection()).mul(RenderSystem.getModelViewMatrix()).mul(pose)
+        mvp.set(McCompat.projection()).mul(McCompat.modelView()).mul(pose)
         matBuf.clear()
         mvp.get(matBuf)
         GL20.glUniformMatrix4fv(locMvp, false, matBuf)

@@ -14,8 +14,6 @@ import me.sorihiko.dango.lyrics.DeepGlow
 import me.sorihiko.dango.ui.GlassRenderContext
 
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.Font
-import net.minecraft.client.renderer.LightTexture
 import org.joml.Matrix4f
 import org.lwjgl.opengl.GL11
 import org.lwjgl.opengl.GL13
@@ -113,12 +111,7 @@ object ModernGfx : Gfx {
     }
 
     private fun drawVanilla(text: String, x: Float, y: Float, argb: Int, pose: Matrix4f) {
-        val buffers = mc.renderBuffers().bufferSource()
-        mc.font.drawInBatch(
-            text, x, y, argb, false, pose, buffers,
-            Font.DisplayMode.SEE_THROUGH, 0, LightTexture.FULL_BRIGHT,
-        )
-        McCompat.vanillaDraw { buffers.endBatch() }
+        McCompat.drawText(text, x, y, argb, pose)
     }
 }
 

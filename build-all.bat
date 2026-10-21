@@ -35,6 +35,22 @@ for /d %%d in (modern\versions\*) do (
     for %%f in ("%%d\build\libs\DangoMusic-%VER%+*.jar") do xcopy /y /q "%%f" dist\ >nul
 )
 
+rem 26.x (Fabric / NeoForge) need JDK 25 (set DANGO_JDK25 to override the default path)
+if not defined DANGO_JDK25 set "DANGO_JDK25=C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot"
+echo.
+echo === 26.x (Fabric / NeoForge) ===
+pushd modern26
+call gradlew.bat "-Dorg.gradle.java.home=%DANGO_JDK25%" build
+if errorlevel 1 (
+    popd
+    echo 26.x build failed
+    exit /b 1
+)
+popd
+for /d %%d in (modern26\versions\*) do (
+    for %%f in ("%%d\build\libs\DangoMusic-%VER%+*.jar") do xcopy /y /q "%%f" dist\ >nul
+)
+
 echo.
 echo Done. Jars in dist\:
 dir /b dist

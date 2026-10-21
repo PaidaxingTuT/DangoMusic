@@ -2,9 +2,9 @@
 
 # Dango Music
 
-在 Minecraft 里听网易云音乐的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 · 1.21.11 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
+在 Minecraft 里听网易云音乐的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 · 1.21.11 · 26.2 · 26.3 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
 
-*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1 & 1.21.11 Fabric & NeoForge) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
+*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1, 1.21.11, 26.2 & 26.3 Fabric & NeoForge) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
 
 ## 截图
 
@@ -47,16 +47,22 @@
 | 1.21.1 NeoForge | `DangoMusic-x.x.x+1.21.1-neoforge.jar` | NeoForge 21.1.x |
 | 1.21.11 Fabric | `DangoMusic-x.x.x+1.21.11-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
 | 1.21.11 NeoForge | `DangoMusic-x.x.x+1.21.11-neoforge.jar` | NeoForge 21.11.x |
+| 26.2 Fabric | `DangoMusic-x.x.x+26.2-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 26.2 NeoForge | `DangoMusic-x.x.x+26.2-neoforge.jar` | NeoForge 26.2.x |
+| 26.3 Fabric | `DangoMusic-x.x.x+26.3-fabric.jar` | Fabric Loader + [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 26.3 NeoForge | `DangoMusic-x.x.x+26.3-neoforge.jar` | NeoForge 26.3.x |
 
 1. 把对应的 jar 放进 `.minecraft/mods`（Fabric 版还要放 Fabric API）
 2. 进游戏按 `M`，点左下角扫码登录网易云
 
 配置、登录凭证、缓存都存在 `.minecraft/config/dangomusic/`，各个版本通用。
 
+26.x 的歌词和播放器界面只支持 OpenGL：视频设置里把图形 API 选成 Vulkan 时只能放音乐，进游戏会在聊天栏提示。
+
 ## 构建
 
-需要 JDK 8（1.8.9）和 JDK 21（1.20.1 以上）。`build-all.bat` 默认用 `C:\Program Files\Java\jdk-21`，
-装在别处的话先设置环境变量 `DANGO_JDK21`。
+需要 JDK 8（1.8.9）、JDK 21（1.20.1～1.21.11）和 JDK 25（26.x）。`build-all.bat` 默认用 `C:\Program Files\Java\jdk-21`
+和 `C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot`，装在别处的话先设置环境变量 `DANGO_JDK21` / `DANGO_JDK25`。
 
 ```bash
 build-all.bat                  # 构建所有版本，jar 都收集到 dist/
@@ -77,10 +83,13 @@ version.properties   版本号（所有 Minecraft 版本共用）
 common/core          核心：模块、设置、网易云接口、播放器、一起听歌（不依赖 Minecraft）
 common/ui            界面：播放器窗口、歌词、Song card、灵动岛（只通过 Gfx / Platform 接口画）
 legacy/              Forge 1.8.9 平台层：实现 Gfx / Platform，OpenGL 2 着色器、字体
-modern/              1.20.1 以上的平台层（一个 Gradle 项目，每个版本 + 加载器一个子项目）
+modern/              1.20.1～1.21.11 的平台层（一个 Gradle 项目，每个版本 + 加载器一个子项目）
   src/main/            所有高版本共用：OpenGL 3.2 core 着色器、字体、按键、播放器界面
   src/mc<版本>/        某个 Minecraft 版本专用的几处写法
   versions/<版本-加载器>/  Fabric / Forge / NeoForge 入口和 mod 信息文件
+modern26/            26.x 的构建（Minecraft 不再混淆，换了一套构建插件和 JDK 25）
+                     代码和 modern/ 共用（modern/src/main + modern/src/mc26.x），这里只有构建配置和入口
+  versions/<版本-加载器>/  Fabric / NeoForge 入口、mixin 和 mod 信息文件
 ```
 
 `common` 不单独构建，由各平台层用 `includeBuild("../common")` 引进去，打进同一个 jar。

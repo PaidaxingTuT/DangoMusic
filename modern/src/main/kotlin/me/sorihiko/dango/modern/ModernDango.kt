@@ -17,6 +17,7 @@ object ModernDango {
     fun start() {
         if (started) return
         started = true
+        McCompat.installJitWorkaround()
         DangoClient.start(ModernPlatform, ModernGfx)
     }
 
@@ -24,6 +25,11 @@ object ModernDango {
     @JvmStatic
     fun tick() {
         if (!started) return
+        if (!McCompat.glAvailable) {
+            McCompat.notifyNoGl()   // 只提示一次
+            DangoMusic.callEvent(TickEvent)
+            return
+        }
         try {
             ModernGl.init()
         } catch (t: Throwable) {
@@ -41,7 +47,7 @@ object ModernDango {
      */
     @JvmStatic
     fun worldRenderEnd() {
-        if (!started) return
+        if (!started || !McCompat.glAvailable) return
         ModernWorld.basePose.identity()
             .rotateX(Math.toRadians(McCompat.cameraXRot().toDouble()).toFloat())
             .rotateY(Math.toRadians(McCompat.cameraYRot().toDouble() + 180.0).toFloat())
@@ -53,5 +59,12 @@ object ModernDango {
         } finally {
             McCompat.popModelView()
         }
+    }
+
+    /** 原版开始画界面之前（26.x：我们的界面在这时画到它自己的贴图上） */
+    @JvmStatic
+    fun beforeGui() {
+        if (!started || !McCompat.glAvailable) return
+        McCompat.beforeGui()
     }
 }

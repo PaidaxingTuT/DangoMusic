@@ -15,7 +15,7 @@ class ModernMusicScreen(
     private val parent: Screen?,
 ) : CompatScreen(Component.literal("Dango Music")) {
 
-    private val screen = DangoClient.newMusicScreen { minecraft?.setScreen(parent) }
+    private val screen = DangoClient.newMusicScreen { McCompat.setScreen(parent) }
 
     override fun init() {
         screen.opened()

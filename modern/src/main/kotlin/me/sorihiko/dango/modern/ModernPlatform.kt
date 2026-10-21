@@ -6,11 +6,10 @@ import me.sorihiko.dango.platform.PlayerPose
 
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ChatScreen
-import org.lwjgl.glfw.GLFW
 
 import java.nio.file.Path
 
-/** 高版本的游戏接口（Fabric 和 Forge 共用）。键码在这里和 GLFW 互相转换，共用代码只看到统一键码 */
+/** 高版本的游戏接口（Fabric 和 Forge 共用）。键码在这里和 GLFW 的编号互相转换（26.3 起再由 McCompat 换成 SDL 的），共用代码只看到统一键码 */
 object ModernPlatform : Platform {
 
     private val mc: Minecraft get() = Minecraft.getInstance()
@@ -29,22 +28,21 @@ object ModernPlatform : Platform {
     override val mouseY: Int
         get() = (mc.mouseHandler.ypos() * mc.window.height / mc.window.screenHeight.coerceAtLeast(1)).toInt()
 
-    override fun isMouseDown(button: Int): Boolean =
-        GLFW.glfwGetMouseButton(McCompat.windowHandle(), button) == GLFW.GLFW_PRESS
+    override fun isMouseDown(button: Int): Boolean = McCompat.isMouseDown(button)
 
     override fun isKeyDown(key: Int): Boolean {
         val glfw = KeyMap.toGlfw(key)
         return glfw > 0 && glfwKey(glfw)
     }
 
-    private fun glfwKey(key: Int): Boolean = GLFW.glfwGetKey(McCompat.windowHandle(), key) == GLFW.GLFW_PRESS
+    private fun glfwKey(key: Int): Boolean = McCompat.isGlfwKeyDown(key)
 
     private val isMac = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
 
     // Mac 上是 Command 键（和原版 Screen.hasControlDown 一样）
     override val ctrlDown: Boolean
-        get() = if (isMac) glfwKey(GLFW.GLFW_KEY_LEFT_SUPER) || glfwKey(GLFW.GLFW_KEY_RIGHT_SUPER)
-        else glfwKey(GLFW.GLFW_KEY_LEFT_CONTROL) || glfwKey(GLFW.GLFW_KEY_RIGHT_CONTROL)
+        get() = if (isMac) glfwKey(GlfwKeys.GLFW_KEY_LEFT_SUPER) || glfwKey(GlfwKeys.GLFW_KEY_RIGHT_SUPER)
+        else glfwKey(GlfwKeys.GLFW_KEY_LEFT_CONTROL) || glfwKey(GlfwKeys.GLFW_KEY_RIGHT_CONTROL)
 
     override var clipboard: String
         get() = mc.keyboardHandler.clipboard
@@ -52,9 +50,9 @@ object ModernPlatform : Platform {
             mc.keyboardHandler.clipboard = value
         }
 
-    override val inGame: Boolean get() = mc.screen == null && mc.level != null
+    override val inGame: Boolean get() = McCompat.currentScreen() == null && mc.level != null
 
-    override val chatOpen: Boolean get() = mc.screen is ChatScreen
+    override val chatOpen: Boolean get() = McCompat.currentScreen() is ChatScreen
 
     override val guiScale: Int get() = mc.window.guiScale.toInt()
 
@@ -76,6 +74,6 @@ object ModernPlatform : Platform {
         }
 
     override fun openMusicScreen() {
-        mc.setScreen(ModernMusicScreen(null))
+        if (McCompat.glAvailable) McCompat.setScreen(ModernMusicScreen(null)) else McCompat.notifyNoGl(again = true)
     }
 }

@@ -23,7 +23,7 @@ object Gl {
     var premultipliedTarget = false
 
     fun blend(on: Boolean) {
-        if (on) GlStateManager._enableBlend() else GlStateManager._disableBlend()
+        GlCache.blend(on)
         if (on) GL11.glEnable(GL11.GL_BLEND) else GL11.glDisable(GL11.GL_BLEND)
     }
 
@@ -72,7 +72,7 @@ object Gl {
     }
 
     fun colorMask(r: Boolean, g: Boolean, b: Boolean, a: Boolean) {
-        GlStateManager._colorMask(r, g, b, a)
+        GlCache.colorMask(r, g, b, a)
         GL11.glColorMask(r, g, b, a)
     }
 
