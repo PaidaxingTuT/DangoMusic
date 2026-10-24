@@ -248,9 +248,6 @@ internal object McCompat {
     /** 不能用 OpenGL 时提示玩家（这些版本一定能用） */
     fun notifyNoGl(again: Boolean = false) {}
 
-    /** 绕开 Java 25 编译器 bug（只有 26.x 用 Java 25，这些版本不用） */
-    fun installJitWorkaround() {}
-
     // ------------------------------------------------------------ 贴图
 
     private var textureCount = 0

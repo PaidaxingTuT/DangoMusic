@@ -398,36 +398,6 @@ internal object McCompat {
     private val SWIZZLE_GRAY = intArrayOf(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_RED)
     private val SWIZZLE_NONE = intArrayOf(GL11.GL_RED, GL11.GL_GREEN, GL11.GL_BLUE, GL11.GL_ALPHA)
 
-    // ------------------------------------------------------------ Java 25 的编译器 bug
-
-    /**
-     * 26.x 跑在 Java 25 上。Java 25 的 C2 编译器（把常用的方法优化成机器码的那个）在优化我们画界面的代码时
-     * 会自己崩掉，整个游戏直接闪退（不是我们的代码出错，日志里是 C2 CompilerThread 崩溃）。
-     * 启动时告诉 JVM：我们自己的代码不用 C2 优化，也不被 C2 内联进别的方法里（只用 C1，画界面够快了）。
-     */
-    fun installJitWorkaround() {
-        try {
-            val file = java.io.File.createTempFile("dangomusic-jit", ".json")
-            file.deleteOnExit()
-            file.writeText(
-                """[
-                  { match: ["me/sorihiko/dango/*.*"], c2: { Exclude: true } },
-                  { match: ["*.*"], c2: { inline: ["-me/sorihiko/dango/*.*"] } }
-                ]""",
-            )
-            val server = java.lang.management.ManagementFactory.getPlatformMBeanServer()
-            val result = server.invoke(
-                javax.management.ObjectName("com.sun.management:type=DiagnosticCommand"),
-                "compilerDirectivesAdd",
-                arrayOf<Any>(arrayOf(file.absolutePath)),
-                arrayOf(Array<String>::class.java.name),
-            )
-            DangoLogger.info("Dango Music: JIT workaround installed: {}", result.toString().trim())
-        } catch (t: Throwable) {
-            DangoLogger.warn("Dango Music: cannot install JIT workaround: {}", t.toString())
-        }
-    }
-
     // ------------------------------------------------------------ 镜头 / 窗口 / 界面
 
     fun cameraXRot(): Float = mc.gameRenderer.mainCamera().xRot()

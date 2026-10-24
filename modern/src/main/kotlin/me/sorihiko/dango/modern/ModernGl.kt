@@ -40,8 +40,7 @@ object ModernGl {
         shaderManager.register(GlassBlurShader())
         shaderManager.load()
 
-        fontManager.register("RobotoSlab-Regular-cut.ttf")   // 第一个注册的是默认字体
-        fontManager.register("Inter-Regular-cut.ttf")
+        fontManager.register("Inter-Regular-cut.ttf")         // 第一个注册的是默认字体（找不到指定字体时用它）
         fontManager.register("Inter-Medium-cut.ttf")
         fontManager.register("Inter-SemiBold-cut.ttf")
         fontManager.register("InterDisplay-Bold-cut.ttf")

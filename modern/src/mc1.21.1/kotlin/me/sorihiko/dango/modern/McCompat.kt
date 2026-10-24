@@ -118,9 +118,6 @@ internal object McCompat {
     /** 不能用 OpenGL 时提示玩家（这些版本一定能用） */
     fun notifyNoGl(again: Boolean = false) {}
 
-    /** 绕开 Java 25 编译器 bug（只有 26.x 用 Java 25，这些版本不用） */
-    fun installJitWorkaround() {}
-
     /** 新建一张贴图交给原版管理，[abgr] 是逐行的像素 */
     fun createTexture(name: String, w: Int, h: Int, abgr: IntArray): ModernTexture {
         val native = NativeImage(w, h, false)

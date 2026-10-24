@@ -17,7 +17,7 @@ object ModernDango {
     fun start() {
         if (started) return
         started = true
-        McCompat.installJitWorkaround()
+        JitWorkaround.install()
         DangoClient.start(ModernPlatform, ModernGfx)
     }
 
