@@ -3,6 +3,7 @@ package me.sorihiko.dango.modern
 import me.sorihiko.dango.DangoMusic
 import me.sorihiko.dango.platform.Platform
 import me.sorihiko.dango.platform.PlayerPose
+import me.sorihiko.dango.platform.PlayerKeyBinding
 
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ChatScreen
@@ -19,6 +20,8 @@ object ModernPlatform : Platform {
 
     override val playerName: String get() = mc.user.name
 
+    override val languageCode: String? get() = mc.options?.languageCode
+
     override val windowWidth: Int get() = mc.window.width
     override val windowHeight: Int get() = mc.window.height
 
@@ -31,9 +34,12 @@ object ModernPlatform : Platform {
     override fun isMouseDown(button: Int): Boolean = McCompat.isMouseDown(button)
 
     override fun isKeyDown(key: Int): Boolean {
+        if (key in -100..-1) return isMouseDown(key + 100)
         val glfw = KeyMap.toGlfw(key)
         return glfw > 0 && glfwKey(glfw)
     }
+
+    override fun syncKeyBindings(bindings: List<PlayerKeyBinding>) = ModernKeyBindings.sync(bindings)
 
     private fun glfwKey(key: Int): Boolean = McCompat.isGlfwKeyDown(key)
 

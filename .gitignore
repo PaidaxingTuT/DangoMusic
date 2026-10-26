@@ -3,6 +3,7 @@
 build/
 dist/
 build.log
+logs/
 run/
 out/
 *.iml

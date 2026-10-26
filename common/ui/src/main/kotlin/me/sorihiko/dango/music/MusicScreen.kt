@@ -1,5 +1,7 @@
 package me.sorihiko.dango.music
 
+import me.sorihiko.dango.i18n.I18n
+
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
 import me.sorihiko.dango.musicui.GridPage
@@ -51,12 +53,19 @@ class MusicScreen(
     private val bar = PlayerBar(this, module)
 
     private var openedAt = 0L
+    private var closingAt = 0L
+    private var closingAlpha = 1f
+    private var closed = false
+    private var openKeyHeld = false
     private var lastNanos = 0L
     /** 换页（含换歌单 / 设置换标签 / 新搜索 / 列表↔封面墙）就重新播入场动画 */
     private var pageKey = ""
 
     /** 界面打开时调用 */
     fun opened() {
+        if (closingAt != 0L) return // 关闭期间的窗口尺寸变化不重新播放入场。
+        closed = false
+        openKeyHeld = platform.isKeyDown(module.openKey.value)
         if (ScreenState.context == null) ScreenState.context = DangoClient.gfx.newCanvas()
         openedAt = System.currentTimeMillis()
         if (Library.playlists.isEmpty()) Library.reloadPlaylists()
@@ -65,7 +74,19 @@ class MusicScreen(
     }
 
     private fun close() {
-        closeScreen()
+        if (closingAt != 0L || closed) return
+        val now = System.currentTimeMillis()
+        closingAlpha = opacity(now)
+        closingAt = now
+        settings.commitEdit()
+        settings.stopDrag()
+        tracks.scrollbarUp()
+    }
+
+    private fun opacity(now: Long): Float = if (closingAt == 0L) {
+        ((now - openedAt) / 180f).coerceIn(0f, 1f)
+    } else {
+        closingAlpha * (1f - (now - closingAt) / 180f).coerceIn(0f, 1f)
     }
 
     // ---------------------------------------------------------------- 导航
@@ -150,6 +171,14 @@ class MusicScreen(
 
     /** 每帧调用 */
     fun render() {
+        if (closed) return
+        val alpha = opacity(System.currentTimeMillis())
+        if (closingAt != 0L && alpha <= 0f) {
+            closed = true
+            if (platform.isKeyDown(module.openKey.value)) module.consumeOpenKey()
+            closeScreen()
+            return
+        }
         val scale = min(platform.windowWidth / 1280f, platform.windowHeight / 800f).coerceAtLeast(0.5f)
         ui.scale = scale
         ui.lw = platform.windowWidth / scale
@@ -173,7 +202,6 @@ class MusicScreen(
             CoverCache.upload()
             login.uploadQr()
 
-            val alpha = ((System.currentTimeMillis() - openedAt) / 180f).coerceIn(0f, 1f)
             ctx.pushScale(scale, scale, 1f)
             ctx.pushOpacity(alpha)
             ctx.drawShape(LayoutBounds(0f, 0f, ui.lw, ui.lh), ShapeStyle(Color(0f, 0f, 0f, 0.22f)))
@@ -185,7 +213,9 @@ class MusicScreen(
 
             if (login.visible) {
                 ctx.pushScale(scale, scale, 1f)
+                ctx.pushOpacity(alpha)
                 login.draw()
+                ctx.popOpacity()
                 ctx.popTransform()
                 ui.mt.flush(scale)
             }
@@ -217,7 +247,7 @@ class MusicScreen(
 
     private fun drawContent(area: LayoutBounds) {
         // 底部小字只在有提示（读取失败等）时显示
-        val foot = Library.status
+        val foot = I18n.message(Library.status)
         if (foot.isNotEmpty()) ui.text(foot, area.x, area.bottom - 11f, 10f, RED, Theme.FONT_SEMIBOLD)
         val body = LayoutBounds(area.x, area.y, area.width, area.height - (if (foot.isNotEmpty()) 18f else 4f))
         // 滚轮区域：哪一页画了，哪一页才有
@@ -237,12 +267,12 @@ class MusicScreen(
             Page.HOME -> {
                 val rec = Library.recommend
                 val items = if (rec.isNullOrEmpty()) Library.playlists else rec
-                val label = if (rec.isNullOrEmpty()) "Your playlists" else "Recommended playlists"
-                grid.draw(body, "Welcome to Dango Music!", "$label · ${items.size}", items, Library.recommendLoading && items.isEmpty())
+                val label = if (rec.isNullOrEmpty()) I18n.text("Your playlists") else I18n.text("Recommended playlists")
+                grid.draw(body, I18n.text("Welcome to Dango Music!"), "$label · ${items.size}", items, Library.recommendLoading && items.isEmpty())
             }
             Page.CHARTS -> {
                 val c = Library.charts ?: emptyList()
-                grid.draw(body, "Charts", "${c.size} charts", c, Library.chartsLoading)
+                grid.draw(body, I18n.text("Charts"), I18n.format("%d charts", c.size), c, Library.chartsLoading)
             }
             Page.PARTY -> ui.itemAnim(0) { party.draw(body) }
             Page.SETTINGS -> settings.draw(body)
@@ -253,12 +283,25 @@ class MusicScreen(
     // ---------------------------------------------------------------- 鼠标
 
     fun mouseClicked(mouseButton: Int) {
+        if (closingAt != 0L || closed) return
         val mx = ui.mx
         val my = ui.my
         if (login.visible) {
             login.mouseClicked(mx, my, mouseButton)
             return
         }
+        if (mouseButton == 0 && settings.resetKeyAt(mx, my)) return
+        if (settings.bindMouse(mouseButton)) return
+        val mouseKey = Keys.mouse(mouseButton)
+        if (mouseKey == module.openKey.value) {
+            if (!openKeyHeld) {
+                openKeyHeld = true
+                module.consumeOpenKey()
+                close()
+            }
+            return
+        }
+        if (module.handleHotkey(mouseKey)) return
         // 鼠标侧键 / 右键：返回上一页
         if (mouseButton == 1 || mouseButton == 3) {
             goBack()
@@ -277,6 +320,7 @@ class MusicScreen(
 
     /** 按住鼠标拖动时调用 */
     fun mouseDragged() {
+        if (closingAt != 0L || closed) return
         if (tracks.sbDragging) {
             tracks.scrollbarDrag((platform.mouseY / ui.scale).toInt())
             return
@@ -285,12 +329,14 @@ class MusicScreen(
     }
 
     fun mouseReleased() {
+        if (module.openKey.value < 0) openKeyHeld = false
         tracks.scrollbarUp()
         settings.stopDrag()
     }
 
     /** 滚轮：[wheel] 正数向上；(x, y) 是滚动时鼠标的窗口像素位置 */
     fun scroll(wheel: Int, x: Int, y: Int) {
+        if (closingAt != 0L || closed) return
         if (wheel == 0 || login.visible) return
         val lx = (x / ui.scale).toInt()
         val ly = (y / ui.scale).toInt()
@@ -308,6 +354,10 @@ class MusicScreen(
 
     /** 按键：[keyCode] 是 [Keys] 键码 */
     fun keyTyped(typedChar: Char, keyCode: Int) {
+        if (closingAt != 0L || closed) {
+            if (keyCode == module.openKey.value) module.consumeOpenKey()
+            return
+        }
         if (login.visible) {
             login.keyTyped(keyCode)
             return
@@ -317,6 +367,14 @@ class MusicScreen(
         if (sidebar.keyTyped(typedChar, keyCode)) return
         if (party.keyTyped(typedChar, keyCode)) return
         if (tracks.filterKeyTyped(typedChar, keyCode)) return
+        if (keyCode != Keys.NONE && keyCode == module.openKey.value) {
+            if (!openKeyHeld) {
+                openKeyHeld = true
+                module.consumeOpenKey()
+                close()
+            }
+            return
+        }
         // 自己设的快捷键在播放器里也能用
         if (keyCode != Keys.ESCAPE && keyCode != module.openKey.value && module.handleHotkey(keyCode)) return
         if (tracks.shortcutBefore(keyCode)) return
@@ -329,8 +387,11 @@ class MusicScreen(
             keyCode == Keys.RIGHT -> MusicPlayer.seek(MusicPlayer.positionMs + 5000)
             keyCode == Keys.LEFT -> MusicPlayer.seek(MusicPlayer.positionMs - 5000)
             keyCode == Keys.ESCAPE -> close()
-            // 按快捷键打开时，同一次按键事件会紧接着传进这个界面，刚打开的一小会儿里不能把它当成"关闭"
-            keyCode == module.openKey.value && System.currentTimeMillis() - openedAt > 300L -> close()
         }
+    }
+
+    /** 松开打开键后，下一次按下才是关闭；长按重复事件不算新按下。 */
+    fun keyReleased(keyCode: Int) {
+        if (keyCode == module.openKey.value) openKeyHeld = false
     }
 }

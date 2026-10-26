@@ -1,5 +1,13 @@
 package me.sorihiko.dango.modern
 
+import com.mojang.blaze3d.platform.InputConstants
+
+import me.sorihiko.dango.platform.PlayerAction
+
+import me.sorihiko.dango.platform.Keys
+
+import net.minecraft.client.KeyMapping
+
 import com.mojang.blaze3d.platform.NativeImage
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.VertexSorting
@@ -34,6 +42,19 @@ internal object GlCache {
  * 每个版本在 src/mc<版本>/ 里放一份，构建时按版本选用，对外的样子完全一样。
  */
 internal object McCompat {
+    fun createPlayerKey(action: PlayerAction): KeyMapping =
+        KeyMapping(action.translationKey, gameBindingKey(action.defaultKey).value, "key.categories.dangomusic")
+
+    fun gameBindingKey(code: Int): InputConstants.Key = when {
+        code == Keys.NONE -> InputConstants.UNKNOWN
+        code < 0 -> InputConstants.Type.MOUSE.getOrCreate(code + 100)
+        else -> InputConstants.Type.KEYSYM.getOrCreate(KeyMap.toGlfw(code))
+    }
+
+    fun commonBindingKey(key: InputConstants.Key): Int =
+        if (key.type == InputConstants.Type.MOUSE) Keys.mouse(key.value) else KeyMap.fromGlfw(key.value)
+
+
     /** 把原版的视图矩阵临时换成单位矩阵（1.20.1：PoseStack） */
     fun pushIdentityModelView() {
         val mv = RenderSystem.getModelViewStack()
@@ -137,6 +158,7 @@ abstract class CompatScreen(title: Component) : Screen(title) {
     abstract fun onMouseReleased()
     abstract fun onScroll(delta: Double)
     abstract fun onKeyPressed(glfwKey: Int)
+    abstract fun onKeyReleased(glfwKey: Int)
     abstract fun onCharTyped(c: Char)
 
     override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
@@ -161,6 +183,11 @@ abstract class CompatScreen(title: Component) : Screen(title) {
 
     override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
         onKeyPressed(keyCode)
+        return true
+    }
+
+    override fun keyReleased(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+        onKeyReleased(keyCode)
         return true
     }
 

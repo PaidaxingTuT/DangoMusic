@@ -1,5 +1,7 @@
 package me.sorihiko.dango.musicui
 
+import me.sorihiko.dango.i18n.I18n
+
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicScreen
 import me.sorihiko.dango.music.NeteasePlaylist
@@ -37,7 +39,7 @@ internal class GridPage(private val screen: MusicScreen) {
     fun draw(page: LayoutBounds, title: String, sub: String, items: List<NeteasePlaylist>, loading: Boolean) {
         ui.headerAnim {
             ui.text(title, page.x, page.y, 22f, Theme.TEXT_PRIMARY, Theme.FONT_DISPLAY)
-            ui.text(if (loading) "Loading..." else sub, page.x, page.y + 30f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_SEMIBOLD)
+            ui.text(if (loading) I18n.text("Loading...") else sub, page.x, page.y + 30f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_SEMIBOLD)
         }
         area = LayoutBounds(page.x, page.y + 54f, page.width, page.bottom - (page.y + 54f))
         drawGrid(area, items)

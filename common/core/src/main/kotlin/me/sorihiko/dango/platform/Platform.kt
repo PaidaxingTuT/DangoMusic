@@ -16,6 +16,9 @@ interface Platform {
     /** 当前登录的玩家名 */
     val playerName: String
 
+    /** 游戏语言代码；客户端早期设置尚未创建时返回 null，不能据此保存默认语言。 */
+    val languageCode: String?
+
     // ---------------------------------------------------------------- 窗口 / 输入
 
     val windowWidth: Int
@@ -29,6 +32,9 @@ interface Platform {
 
     /** [key] 是 [Keys] 键码 */
     fun isKeyDown(key: Int): Boolean
+
+    /** 设置对象创建后同步原版按键页面和模组内绑定。 */
+    fun syncKeyBindings(bindings: List<PlayerKeyBinding>) {}
 
     val ctrlDown: Boolean
 

@@ -1,5 +1,7 @@
 package me.sorihiko.dango.musicui
 
+import me.sorihiko.dango.i18n.I18n
+
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicScreen
@@ -67,7 +69,7 @@ internal class Sidebar(private val screen: MusicScreen) {
         ctx.drawShape(LayoutBounds(x + 11f, y + 10f, 9f, 9f), ShapeStyle(Color(0f, 0f, 0f, 0f), 4.5f, 1.4f, Theme.TEXT_SECONDARY))
         ctx.drawShape(LayoutBounds(x + 18.5f, y + 18f, 4.5f, 1.6f), ShapeStyle(Theme.TEXT_SECONDARY, 0.8f))
         val caret = if (searchFocused && caretVisible()) "|" else ""
-        val shown = if (searchText.isEmpty() && !searchFocused) "Search songs..." else searchText + caret
+        val shown = if (searchText.isEmpty() && !searchFocused) I18n.text("Search songs...") else searchText + caret
         val shownColor = if (searchText.isEmpty() && !searchFocused) Theme.TEXT_TERTIARY else Theme.TEXT_PRIMARY
         val maxW = searchRect.right - 10f - (x + 30f)
         var visible = shown
@@ -96,14 +98,14 @@ internal class Sidebar(private val screen: MusicScreen) {
         }
 
         section("DANGO MUSIC")
-        nav("⌂", "Home", page == Page.HOME, true) { screen.go(Page.HOME) }
-        section("DISCOVER")
-        nav("▤", "Charts", page == Page.CHARTS, false) { screen.go(Page.CHARTS) }
-        nav("♫", "Now Playing", page == Page.QUEUE, false) { screen.go(Page.QUEUE) }
-        nav("♬", if (ListenParty.role == ListenParty.Role.NONE) "Listen Together" else "Listen Together · " + ListenParty.members.size,
+        nav("⌂", I18n.text("Home"), page == Page.HOME, true) { screen.go(Page.HOME) }
+        section(I18n.text("DISCOVER"))
+        nav("▤", I18n.text("Charts"), page == Page.CHARTS, false) { screen.go(Page.CHARTS) }
+        nav("♫", I18n.text("Now Playing"), page == Page.QUEUE, false) { screen.go(Page.QUEUE) }
+        nav("♬", if (ListenParty.role == ListenParty.Role.NONE) I18n.text("Listen Together") else I18n.text("Listen Together · ") + ListenParty.members.size,
             page == Page.PARTY, ListenParty.role != ListenParty.Role.NONE) { screen.go(Page.PARTY) }
         y += 4f
-        section("MY PLAYLISTS")
+        section(I18n.text("MY PLAYLISTS"))
 
         // 歌单列表（底部留出按钮和账号的位置）
         val rowH = 30f
@@ -138,7 +140,7 @@ internal class Sidebar(private val screen: MusicScreen) {
         }
         ui.endClip()
         if (list.isEmpty()) {
-            val msg = if (Library.playlistsLoading) "Loading..." else if (NeteaseApi.loggedIn) "No playlists" else "Log in to see your playlists"
+            val msg = if (Library.playlistsLoading) I18n.text("Loading...") else if (NeteaseApi.loggedIn) I18n.text("No playlists") else I18n.text("Log in to see your playlists")
             ui.text(msg, x + 2f, listArea.y + 6f, 11f, Theme.TEXT_TERTIARY)
         }
 
@@ -149,7 +151,7 @@ internal class Sidebar(private val screen: MusicScreen) {
         ui.card(sb, if (on) RED.copy(a = 0.22f) else if (ui.hover(sb)) Theme.CARD_HOVER else Theme.CARD, 10f)
         if (on) ctx.drawShape(sb, ShapeStyle(Color(0f, 0f, 0f, 0f), 10f, 1f, RED.copy(a = 0.6f)))
         val sCol = if (on) RED else Theme.TEXT_PRIMARY
-        val sLabel = "Settings"
+        val sLabel = I18n.text("Settings")
         val sw = 14f + 6f + ui.width(sLabel, 12f, Theme.FONT_SEMIBOLD)
         val sx = sb.x + (sb.width - sw) / 2f
         ui.icon("⚙", sx + 7f, sb.y + 16f, 14f, sCol)
@@ -169,12 +171,12 @@ internal class Sidebar(private val screen: MusicScreen) {
         if (NeteaseApi.loggedIn) {
             val aurl = NeteaseApi.avatarUrl
             ui.drawCover(av, if (aurl.isNotEmpty()) CoverCache.get("u:${NeteaseApi.userId}", aurl) else null, 14f)
-            val who = NeteaseApi.nickname.ifEmpty { "Logged in" }
-            val outW = ui.width("Log out", 10f, Theme.FONT_MEDIUM)
+            val who = NeteaseApi.nickname.ifEmpty { I18n.text("Logged in") }
+            val outW = ui.width(I18n.text("Log out"), 10f, Theme.FONT_MEDIUM)
             ui.text(ui.trim(who, ub.right - outW - 18f - (av.right + 10f), 12f), av.right + 10f, ub.y + 14f, 12f, Theme.TEXT_PRIMARY)
             val outB = LayoutBounds(ub.right - outW - 14f, ub.y + 10f, outW + 10f, 20f)
             if (ui.hover(outB)) ui.card(outB, Theme.CARD_HOVER, 6f)
-            ui.text("Log out", outB.x + 5f, outB.y + 6f, 10f, Theme.TEXT_TERTIARY, Theme.FONT_MEDIUM)
+            ui.text(I18n.text("Log out"), outB.x + 5f, outB.y + 6f, 10f, Theme.TEXT_TERTIARY, Theme.FONT_MEDIUM)
             ui.hits += outB to {
                 NeteaseApi.logout()
                 Library.refreshAll()
@@ -183,7 +185,7 @@ internal class Sidebar(private val screen: MusicScreen) {
             if (ui.hover(ub)) ui.card(ub, Theme.CARD_HOVER, 10f)
             ui.ctx.drawShape(av, ShapeStyle(Theme.TRACK, 14f))
             ui.icon("?", av.x + 14f, av.y + 14f, 12f, Theme.TEXT_SECONDARY)
-            ui.text("Log in to NetEase", av.right + 10f, ub.y + 14f, 12f, RED, Theme.FONT_SEMIBOLD)
+            ui.text(I18n.text("Log in to NetEase"), av.right + 10f, ub.y + 14f, 12f, RED, Theme.FONT_SEMIBOLD)
             ui.hits += ub to { screen.login.open() }
         }
     }

@@ -1,5 +1,11 @@
 package me.sorihiko.dango.modern
 
+import me.sorihiko.dango.platform.PlayerAction
+
+import me.sorihiko.dango.platform.Keys
+
+import net.minecraft.client.KeyMapping
+
 import me.sorihiko.dango.DangoLogger
 
 import com.mojang.blaze3d.ProjectionType
@@ -76,6 +82,21 @@ internal object GlCache {
  * - 显卡接口可以选 Vulkan，选了 Vulkan 时我们没法用 OpenGL 画，只放音乐、提示一下。
  */
 internal object McCompat {
+    private val playerKeyCategory by lazy { KeyMapping.Category.register(net.minecraft.resources.Identifier.fromNamespaceAndPath("dangomusic", "controls")) }
+
+    fun createPlayerKey(action: PlayerAction): KeyMapping =
+        KeyMapping(action.translationKey, gameBindingKey(action.defaultKey).value, playerKeyCategory)
+
+    fun gameBindingKey(code: Int): InputConstants.Key = when {
+        code == Keys.NONE -> InputConstants.UNKNOWN
+        code < 0 -> InputConstants.Type.MOUSE.getOrCreate(when (val button = code + 100) { 0 -> 1; 1 -> 3; 2 -> 2; else -> button + 1 })
+        else -> InputConstants.Type.KEYBOARD.getOrCreate(SdlKeys.fromGlfw(KeyMap.toGlfw(code)))
+    }
+
+    fun commonBindingKey(key: InputConstants.Key): Int =
+        if (key.type == InputConstants.Type.MOUSE) Keys.mouse(when (key.value) { 1 -> 0; 3 -> 1; 2 -> 2; else -> key.value - 1 }) else KeyMap.fromGlfw(SdlKeys.toGlfw(key.value))
+
+
     private val mc: Minecraft get() = Minecraft.getInstance()
 
     /** 把原版的视图矩阵临时换成单位矩阵 */
@@ -427,12 +448,9 @@ internal object McCompat {
      * （原版 MouseHandler 也记着三个键，但开着界面时它不更新，拖滑块时会一直是"没按"）
      */
     fun isMouseDown(button: Int): Boolean {
-        val mask = when (button) {
-            0 -> org.lwjgl.sdl.SDLMouse.SDL_BUTTON_LMASK
-            1 -> org.lwjgl.sdl.SDLMouse.SDL_BUTTON_RMASK
-            2 -> org.lwjgl.sdl.SDLMouse.SDL_BUTTON_MMASK
-            else -> return false
-        }
+        val sdlButton = when (button) { 0 -> 1; 1 -> 3; 2 -> 2; else -> button + 1 }
+        if (sdlButton !in 1..31) return false
+        val mask = 1 shl (sdlButton - 1)
         val state = org.lwjgl.sdl.SDLMouse.SDL_GetMouseState(null as java.nio.FloatBuffer?, null as java.nio.FloatBuffer?)
         return state and mask != 0
     }
@@ -569,6 +587,7 @@ abstract class CompatScreen(title: Component) : Screen(title) {
     abstract fun onMouseReleased()
     abstract fun onScroll(delta: Double)
     abstract fun onKeyPressed(glfwKey: Int)
+    abstract fun onKeyReleased(glfwKey: Int)
     abstract fun onCharTyped(c: Char)
 
     /**
@@ -599,7 +618,7 @@ abstract class CompatScreen(title: Component) : Screen(title) {
             1 -> 0
             3 -> 1
             2 -> 2
-            else -> event.button()
+            else -> event.button() - 1
         }
         onMouseClicked(button)
         return true
@@ -623,6 +642,11 @@ abstract class CompatScreen(title: Component) : Screen(title) {
     override fun keyPressed(event: KeyEvent): Boolean {
         // 26.3 起 key() 是 SDL 的键位编号，换成共用代码认的 GLFW 键码
         onKeyPressed(SdlKeys.toGlfw(event.key()))
+        return true
+    }
+
+    override fun keyReleased(event: KeyEvent): Boolean {
+        onKeyReleased(SdlKeys.toGlfw(event.key()))
         return true
     }
 

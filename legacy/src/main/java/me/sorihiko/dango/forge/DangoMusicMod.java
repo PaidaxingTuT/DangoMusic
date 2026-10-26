@@ -1,6 +1,7 @@
 package me.sorihiko.dango.forge;
 
 import me.sorihiko.dango.legacy.LegacyDango;
+import me.sorihiko.dango.legacy.LegacyKeyBindings;
 
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.FMLCommonHandler;
@@ -15,6 +16,7 @@ public class DangoMusicMod {
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
+        LegacyKeyBindings.register();
         LegacyDango.start();
         ForgeBridge bridge = new ForgeBridge();
         MinecraftForge.EVENT_BUS.register(bridge);

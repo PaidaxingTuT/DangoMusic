@@ -51,4 +51,9 @@ class LegacyMusicScreen(
     override fun keyTyped(typedChar: Char, keyCode: Int) {
         screen.keyTyped(typedChar, keyCode)
     }
+
+    override fun handleKeyboardInput() {
+        if (!Keyboard.getEventKeyState()) screen.keyReleased(Keyboard.getEventKey())
+        super.handleKeyboardInput()
+    }
 }

@@ -56,7 +56,10 @@ object Keys {
         put(218, "CLEAR"); put(219, "LMETA"); put(220, "RMETA"); put(221, "APPS"); put(222, "POWER"); put(223, "SLEEP")
     }
 
-    fun name(key: Int): String? = names[key]
+    fun name(key: Int): String? = if (key in -100..-1) "Mouse ${key + 101}" else names[key]
+
+    /** 与旧版 Minecraft 一致：鼠标左键 -100，右键 -99，中键 -98。 */
+    fun mouse(button: Int): Int = button - 100
 
     /** 能输进文本框的字符（和原版 ChatAllowedCharacters 一样：不能是 § 和控制字符） */
     fun isAllowedChar(c: Char): Boolean = c != '§' && c >= ' ' && c != '\u007f'

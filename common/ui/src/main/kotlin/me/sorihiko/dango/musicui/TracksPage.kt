@@ -1,5 +1,7 @@
 package me.sorihiko.dango.musicui
 
+import me.sorihiko.dango.i18n.I18n
+
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicPlayer
@@ -93,7 +95,7 @@ internal class TracksPage(private val screen: MusicScreen) {
 
     fun currentTracks(): Pair<String, List<NeteaseTrack>?> = when (ScreenState.page) {
         Page.SEARCH -> "\"${ScreenState.lastQuery}\"" to Library.searchResults
-        Page.QUEUE -> "Now Playing" to MusicPlayer.queue
+        Page.QUEUE -> I18n.text("Now Playing") to MusicPlayer.queue
         Page.PLAYLIST -> {
             val p = ScreenState.opened
             (p?.name ?: "") to (if (p != null) Library.tracks(p.id) else null)
@@ -174,7 +176,7 @@ internal class TracksPage(private val screen: MusicScreen) {
         if (tracks == null) return
         val list = shown(tracks)
         if (list.isEmpty() && filterText.isNotEmpty()) {
-            ui.text("No songs match \"$filterText\"", area.x + 12f, area.y + 20f, 12f, Theme.TEXT_TERTIARY)
+            ui.text(I18n.format("No songs match \"%s\"", filterText), area.x + 12f, area.y + 20f, 12f, Theme.TEXT_TERTIARY)
             return
         }
         if (ScreenState.coverView) ui.itemAnim(0) { drawCoverflow(area, tracks, list) } else drawTrackList(area, tracks, list)
@@ -207,26 +209,26 @@ internal class TracksPage(private val screen: MusicScreen) {
         }
 
         val header = when (state.page) {
-            Page.SEARCH -> "Search  \"${state.lastQuery}\""
-            Page.QUEUE -> "Now Playing"
+            Page.SEARCH -> I18n.format("Search  \"%s\"", state.lastQuery)
+            Page.QUEUE -> I18n.text("Now Playing")
             else -> title
         }
         val segW = 132f
         ui.text(ui.trim(header, page.right - segW - 24f - x, 22f, Theme.FONT_DISPLAY), x, y + 4f, 22f, Theme.TEXT_PRIMARY, Theme.FONT_DISPLAY)
         val sub = when {
-            state.page == Page.SEARCH && Library.searching -> "Searching..."
+            state.page == Page.SEARCH && Library.searching -> I18n.text("Searching...")
             state.page == Page.SEARCH && tracks.isNullOrEmpty() ->
-                if (NeteaseApi.lastSearchError.isNotEmpty()) "Search failed: " + NeteaseApi.lastSearchError else "No results"
-            state.page == Page.QUEUE && tracks.isNullOrEmpty() -> "Nothing in the queue yet"
-            tracks == null -> "Loading..."
-            filterText.isNotEmpty() -> "${shown(tracks).size} of ${tracks.size} songs"
-            else -> "${tracks.size} songs"
+                if (NeteaseApi.lastSearchError.isNotEmpty()) I18n.text("Search failed: ") + NeteaseApi.lastSearchError else I18n.text("No results")
+            state.page == Page.QUEUE && tracks.isNullOrEmpty() -> I18n.text("Nothing in the queue yet")
+            tracks == null -> I18n.text("Loading...")
+            filterText.isNotEmpty() -> I18n.format("%d of %d songs", shown(tracks).size, tracks.size)
+            else -> I18n.format("%d songs", tracks.size)
         }
         ui.text(sub, x, y + 34f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_SEMIBOLD)
 
         // 播放全部
         if (!tracks.isNullOrEmpty() && state.page != Page.QUEUE) {
-            val label = "Play all"
+            val label = I18n.text("Play all")
             val pb = LayoutBounds(x, y + (if (headerH > 100f) 64f else 52f) - 6f, ui.width(label, 12f, Theme.FONT_SEMIBOLD) + 44f, 30f)
             ctx.drawShape(pb, ShapeStyle(if (ui.hover(pb)) RED.copy(a = 0.85f) else RED, 15f))
             ui.icon("▶", pb.x + 17f, pb.y + 15f, 11f, Theme.TEXT_PRIMARY)
@@ -242,9 +244,9 @@ internal class TracksPage(private val screen: MusicScreen) {
         val other = LayoutBounds(seg.x + segW / 2f, seg.y, segW / 2f, seg.height)
         val coverView = state.coverView
         ctx.drawGlass(if (coverView) other else half, Theme.GLASS_SELECTION)
-        ui.text("List", half.x + (half.width - ui.width("List", 12f, Theme.FONT_MEDIUM)) / 2f, half.y + 8f, 12f,
+        ui.text(I18n.text("List"), half.x + (half.width - ui.width(I18n.text("List"), 12f, Theme.FONT_MEDIUM)) / 2f, half.y + 8f, 12f,
             if (coverView) Theme.TEXT_SECONDARY else Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
-        ui.text("Covers", other.x + (other.width - ui.width("Covers", 12f, Theme.FONT_MEDIUM)) / 2f, other.y + 8f, 12f,
+        ui.text(I18n.text("Covers"), other.x + (other.width - ui.width(I18n.text("Covers"), 12f, Theme.FONT_MEDIUM)) / 2f, other.y + 8f, 12f,
             if (coverView) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY, Theme.FONT_MEDIUM)
         ui.hits += half to { if (ScreenState.coverView) screen.toggleCoverView() }
         ui.hits += other to { if (!ScreenState.coverView) screen.toggleCoverView() }
@@ -252,7 +254,7 @@ internal class TracksPage(private val screen: MusicScreen) {
         // 定位到正在播放（列表里有这首歌时才显示）
         var rightX = seg.x - 10f
         if (currentInList()) {
-            val label = "Locate"
+            val label = I18n.text("Locate")
             val lw = ui.width(label, 11f, Theme.FONT_MEDIUM) + 34f
             val lb = LayoutBounds(rightX - lw, y + 4f, lw, 26f)
             ui.card(lb, if (ui.hover(lb)) Theme.CARD_HOVER else Theme.CARD, 13f)
@@ -277,7 +279,7 @@ internal class TracksPage(private val screen: MusicScreen) {
         ctx.drawShape(LayoutBounds(filterRect.x + 16.5f, filterRect.y + 15f, 4f, 1.5f), ShapeStyle(Theme.TEXT_SECONDARY, 0.75f))
         val caret = if (filterFocused && caretVisible()) "|" else ""
         val placeholder = filterText.isEmpty() && !filterFocused
-        var shownText = if (placeholder) "Filter this list..." else filterText + caret
+        var shownText = if (placeholder) I18n.text("Filter this list...") else filterText + caret
         val maxW = filterRect.width - 30f - (if (filterText.isNotEmpty()) 18f else 0f)
         while (shownText.length > 1 && ui.width(shownText, 11f) > maxW) shownText = shownText.substring(1)
         ui.text(shownText, filterRect.x + 26f, filterRect.y + 8f, 11f, if (placeholder) Theme.TEXT_TERTIARY else Theme.TEXT_PRIMARY)
@@ -359,9 +361,9 @@ internal class TracksPage(private val screen: MusicScreen) {
         val ctx = ui.ctx
         // 表头
         ui.text("#", list.x + 12f, list.y, 10f, Theme.TEXT_TERTIARY, Theme.FONT_SEMIBOLD)
-        ui.text("TITLE", list.x + 84f, list.y, 10f, Theme.TEXT_TERTIARY, Theme.FONT_SEMIBOLD)
+        ui.text(I18n.text("TITLE"), list.x + 84f, list.y, 10f, Theme.TEXT_TERTIARY, Theme.FONT_SEMIBOLD)
         val sbW = 16f   // 右边留给滚动条
-        ui.text("TIME", list.right - sbW - 12f - ui.width("TIME", 10f, Theme.FONT_SEMIBOLD), list.y, 10f, Theme.TEXT_TERTIARY, Theme.FONT_SEMIBOLD)
+        ui.text(I18n.text("TIME"), list.right - sbW - 12f - ui.width(I18n.text("TIME"), 10f, Theme.FONT_SEMIBOLD), list.y, 10f, Theme.TEXT_TERTIARY, Theme.FONT_SEMIBOLD)
         ctx.drawShape(LayoutBounds(list.x, list.y + 16f, list.width - sbW, 1f), ShapeStyle(Theme.SEPARATOR))
         val body = LayoutBounds(list.x, list.y + 22f, list.width - sbW, list.height - 22f)
 

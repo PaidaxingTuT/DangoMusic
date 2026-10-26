@@ -37,6 +37,8 @@ object MusicPlayer {
         private set
 
     @Volatile var shuffle = false
+    /** 歌曲自然播完时重播当前曲目；手动切歌仍按队列 / Shuffle 工作。 */
+    @Volatile var repeatOne = false
     /** 0..1 */
     @Volatile var volume = 0.5f
 
@@ -397,6 +399,9 @@ object MusicPlayer {
                 // 跟随房主时放完就停在结尾，等房主切下一首
                 pausedAtMs = durationMs
                 state = State.PAUSED
+            } else if (repeatOne) {
+                // 复用已下载的音频，从头解码，不重新请求播放地址或下载。
+                seek(0L)
             } else {
                 next()
             }

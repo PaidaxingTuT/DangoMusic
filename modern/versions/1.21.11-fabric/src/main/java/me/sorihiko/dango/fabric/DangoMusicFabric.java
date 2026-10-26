@@ -1,6 +1,8 @@
 package me.sorihiko.dango.fabric;
 
 import me.sorihiko.dango.modern.ModernDango;
+import me.sorihiko.dango.modern.ModernKeyBindings;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -13,6 +15,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 public class DangoMusicFabric implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
+        ModernKeyBindings.register(KeyBindingHelper::registerKeyBinding);
         ModernDango.start();
         ClientTickEvents.START_CLIENT_TICK.register(client -> ModernDango.tick());
     }

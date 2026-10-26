@@ -1,6 +1,7 @@
 package me.sorihiko.dango
 
 import me.sorihiko.dango.gfx.Gfx
+import me.sorihiko.dango.i18n.I18n
 import me.sorihiko.dango.module.impls.music.DynamicIslandModule
 import me.sorihiko.dango.module.impls.music.LyricsModule
 import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
@@ -21,15 +22,18 @@ object DangoClient {
     @JvmStatic
     fun start(platform: Platform, gfx: Gfx) {
         this.gfx = gfx
+        I18n.language = I18n.ENGLISH // 未显示 UI 的启动阶段占位；不写入语言设置。
+        val musicModule = NeteaseMusicModule()
         DangoMusic.start(
             platform,
             listOf(
-                NeteaseMusicModule(),
+                musicModule,
                 LyricsModule(),
                 SongCardModule(),
                 DynamicIslandModule(),
             ),
         )
+        musicModule.applyLanguage() // ConfigManager 已读回手动选择，优先于首次默认值。
     }
 
     /** 平台层打开播放器界面时用：新建一个播放器界面，[close] 由平台层提供（关掉这个界面） */

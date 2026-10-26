@@ -2,6 +2,7 @@ package me.sorihiko.dango.musicui
 
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.DangoMusic
+import me.sorihiko.dango.i18n.I18n
 import me.sorihiko.dango.module.Module
 import me.sorihiko.dango.module.impls.music.DynamicIslandModule
 import me.sorihiko.dango.module.impls.music.LyricsModule
@@ -28,7 +29,7 @@ import kotlin.math.roundToInt
 internal class SettingsPage(private val screen: MusicScreen, private val module: NeteaseMusicModule) {
     private val ui = screen.ui
 
-    private enum class Ctl { TOGGLE, SLIDER, SWATCH, KEY }
+    private enum class Ctl { TOGGLE, SLIDER, SWATCH, KEY, LANGUAGE }
 
     /** scale：显示值 = 实际值 × scale（百分比的选项是 100），手动输入时按显示值换算回去 */
     private class Row(
@@ -70,6 +71,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
     // 正在录快捷键的那一项，以及本帧所有快捷键按钮的区域（点别处就取消录制）
     var bindingKey: IntValue? = null
     private val keyButtons = mutableListOf<LayoutBounds>()
+    private val keyResetButtons = mutableListOf<Hit>()
 
     val editing: Boolean get() = editRow != null
 
@@ -85,6 +87,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
     fun beginFrame() {
         keyButtons.clear()
+        keyResetButtons.clear()
     }
 
     fun resetScroll() {
@@ -168,6 +171,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             fun take(names: List<String>? = null): List<Row> = (names ?: left.keys.toList()).mapNotNull { k ->
                 val (ann, v) = left.remove(k) ?: return@mapNotNull null
                 val ctl = when {
+                    k == "language" -> Ctl.LANGUAGE
                     v is BooleanValue -> Ctl.TOGGLE
                     k == "glowColor" -> Ctl.SWATCH
                     k == "openKey" || (k.startsWith("key") && v is IntValue) -> Ctl.KEY
@@ -203,10 +207,11 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
         val player = Src(module, fmts = mapOf("volume" to ::percent))
         player.left.remove("shuffle")   // 随机播放用播放栏上的按钮就够了，设置页不再显示（状态照样保存）
+        player.left.remove("repeatOne") // 单曲循环同样通过播放栏控制
         val card = Src(mm.get(SongCardModule::class.java), fmts = mapOf("posX" to ::percent, "posY" to ::percent))
         val island = Src(mm.get(DynamicIslandModule::class.java), fmts = mapOf("notifyTime" to { v: Any -> "%.1f s".format((v as FloatValue).value) }))
         val music = listOf(
-            Group("Player", "Playback", player.m, false, player.take(listOf("volume"))),
+            Group("Player", "Playback", player.m, false, player.take(listOf("volume", "language"))),
             Group("Hotkeys", "Click, then press a key · Backspace clears", player.m, false, player.take()),
             Group("Song card", "Overlay", card.m, true, card.take()),
             nowPlaying,
@@ -219,8 +224,8 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
     fun draw(page: LayoutBounds) {
         ui.headerAnim {
-            ui.text("Settings", page.x, page.y, 22f, Theme.TEXT_PRIMARY, Theme.FONT_DISPLAY)
-            ui.text("Changes apply instantly and are saved automatically", page.x, page.y + 30f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_SEMIBOLD)
+            ui.text(I18n.text("Settings"), page.x, page.y, 22f, Theme.TEXT_PRIMARY, Theme.FONT_DISPLAY)
+            ui.text(I18n.text("Changes apply instantly and are saved automatically"), page.x, page.y + 30f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_SEMIBOLD)
             drawTabs(page)
         }
 
@@ -267,7 +272,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
     /** 标签：Lyrics / Music & HUD */
     private fun drawTabs(page: LayoutBounds) {
-        val names = listOf("Lyrics", "Music & HUD")
+        val names = listOf(I18n.text("Lyrics"), I18n.text("Music & HUD"))
         val tabW = 104f
         val bar = LayoutBounds(page.right - tabW * names.size - 8f, page.y + 2f, tabW * names.size + 8f, 32f)
         ui.card(bar, Theme.CARD, 11f)
@@ -293,8 +298,9 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         ctx.drawShape(b, ShapeStyle(Color(1f, 1f, 1f, 0.05f), 14f))
         val x = b.x + 14f
         val iw = b.width - 28f
-        ui.text(g.title, x, b.y + 13f, 13f, Theme.TEXT_PRIMARY, Theme.FONT_SEMIBOLD)
-        ui.text(g.sub, x + ui.width(g.title, 13f, Theme.FONT_SEMIBOLD) + 8f, b.y + 14.5f, 10f, Theme.TEXT_TERTIARY)
+        val title = I18n.text(g.title)
+        ui.text(title, x, b.y + 13f, 13f, Theme.TEXT_PRIMARY, Theme.FONT_SEMIBOLD)
+        ui.text(I18n.text(g.sub), x + ui.width(title, 13f, Theme.FONT_SEMIBOLD) + 8f, b.y + 14.5f, 10f, Theme.TEXT_TERTIARY)
         if (g.toggle) {
             val m = g.owner
             ui.toggleSwitch(LayoutBounds(b.right - 14f - 34f, b.y + 9f, 34f, 20f), m.enabled, clip) { m.enabled = !m.enabled }
@@ -316,11 +322,12 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             Ctl.TOGGLE -> 34f
             Ctl.SLIDER -> 166f
             Ctl.SWATCH -> 16f * 4 + 8f * 3
-            Ctl.KEY -> 72f
+            Ctl.KEY -> 130f
+            Ctl.LANGUAGE -> 142f
         }
         val textW = b.width - ctlW - 14f
-        ui.text(ui.trim(r.label, textW, 12f, Theme.FONT_MEDIUM), b.x, b.y + 8f, 12f, Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
-        if (r.desc.isNotEmpty()) ui.text(ui.trim(r.desc, textW, 9.5f), b.x, b.y + 24f, 9.5f, Theme.TEXT_TERTIARY)
+        ui.text(ui.trim(I18n.text(r.label), textW, 12f, Theme.FONT_MEDIUM), b.x, b.y + 8f, 12f, Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
+        if (r.desc.isNotEmpty()) ui.text(ui.trim(I18n.text(r.desc), textW, 9.5f), b.x, b.y + 24f, 9.5f, Theme.TEXT_TERTIARY)
         val cy = b.y + b.height / 2f
         val cx = b.right - ctlW
         when (r.ctl) {
@@ -340,6 +347,19 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
                 }
             }
             Ctl.KEY -> drawKeyButton(r.value as IntValue, clip, cx, cy)
+            Ctl.LANGUAGE -> {
+                val v = r.value as IntValue
+                listOf("English", "中文").forEachIndexed { i, label ->
+                    val button = LayoutBounds(cx + i * 74f, cy - 12f, 68f, 24f)
+                    ui.card(button, if (v.value == i) RED else if (ui.hover(button)) Theme.CARD_HOVER else Theme.CARD, 7f)
+                    ui.text(label, button.x + (button.width - ui.width(label, 11f, Theme.FONT_MEDIUM)) / 2f,
+                        cy - 11f * 0.39f - 0.5f, 11f, Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
+                    ui.hits += button.intersect(clip) to {
+                        v.setValue(i)
+                        module.applyLanguage()
+                    }
+                }
+            }
         }
     }
 
@@ -388,8 +408,8 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         ui.card(kb, if (binding) RED.copy(a = 0.22f) else if (ui.hover(kb)) Theme.CARD_HOVER else Theme.CARD, 7f)
         if (binding) ui.ctx.drawShape(kb, ShapeStyle(Color(0f, 0f, 0f, 0f), 7f, 1f, RED))
         val name = when {
-            binding -> "Press a key"
-            v.value == 0 -> "None"
+            binding -> I18n.text("Press a key")
+            v.value == 0 -> I18n.text("None")
             else -> Keys.name(v.value) ?: "#${v.value}"
         }
         val s = ui.trim(name, kb.width - 10f, 11f, Theme.FONT_SEMIBOLD)
@@ -398,6 +418,27 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         val hb = kb.intersect(clip)
         keyButtons += hb
         ui.hits += hb to { bindingKey = if (bindingKey === v) null else v }
+
+        val reset = LayoutBounds(kb.right + 6f, kb.y, 52f, kb.height)
+        ui.card(reset, if (ui.hover(reset)) Theme.CARD_HOVER else Theme.CARD, 7f)
+        val label = I18n.text("Reset")
+        ui.text(label, reset.x + (reset.width - ui.width(label, 11f, Theme.FONT_MEDIUM)) / 2f,
+            cy - 11f * 0.39f - 0.5f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_MEDIUM)
+        val resetHit: Hit = reset.intersect(clip) to {
+            bindingKey = null
+            module.resetKeyBinding(v)
+        }
+        keyResetButtons += resetHit
+        ui.hits += resetHit
+    }
+
+    /** 重置优先于鼠标录制，避免点击重置时反而绑定成鼠标左键。 */
+    fun resetKeyAt(x: Int, y: Int): Boolean {
+        val hit = keyResetButtons.firstOrNull { it.first.contains(x, y) } ?: return false
+        commitEdit()
+        screen.blurTextFields()
+        hit.second.invoke()
+        return true
     }
 
     private fun applyDrag() {
@@ -426,13 +467,20 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             }
             return true
         }
-        // 正在录按键：Esc 取消；Backspace / Delete 清空（Open key 不能清空）
+        // 正在录按键：Esc 取消；Backspace / Delete 清空。
         val v = bindingKey ?: return false
         when {
             keyCode == Keys.ESCAPE -> {}
-            (keyCode == Keys.BACK || keyCode == Keys.DELETE) && v.minRange == 0 -> v.setValue(0)
+            (keyCode == Keys.BACK || keyCode == Keys.DELETE) && v.minRange <= 0 -> v.setValue(0)
             keyCode != 0 -> v.setValue(keyCode)
         }
+        bindingKey = null
+        return true
+    }
+
+    fun bindMouse(button: Int): Boolean {
+        val value = bindingKey ?: return false
+        value.setValue(Keys.mouse(button))
         bindingKey = null
         return true
     }

@@ -1,6 +1,9 @@
 package me.sorihiko.dango.neoforge;
 
 import me.sorihiko.dango.modern.ModernDango;
+import me.sorihiko.dango.modern.ModernKeyBindings;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.Mod;
@@ -15,7 +18,8 @@ import net.neoforged.neoforge.common.NeoForge;
 @Mod(value = "dangomusic", dist = Dist.CLIENT)
 public class DangoMusicNeoForge {
 
-    public DangoMusicNeoForge() {
+    public DangoMusicNeoForge(IEventBus modBus) {
+        modBus.addListener((RegisterKeyMappingsEvent event) -> ModernKeyBindings.register(event::register));
         ModernDango.start();
         NeoForge.EVENT_BUS.addListener(DangoMusicNeoForge::onClientTick);
         NeoForge.EVENT_BUS.addListener(DangoMusicNeoForge::onRenderLevel);

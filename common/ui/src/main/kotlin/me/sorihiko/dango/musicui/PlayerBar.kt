@@ -1,5 +1,7 @@
 package me.sorihiko.dango.musicui
 
+import me.sorihiko.dango.i18n.I18n
+
 import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicPlayer
@@ -12,7 +14,7 @@ import me.sorihiko.dango.utils.Color
 import kotlin.math.max
 import kotlin.math.min
 
-/** 底部播放栏：左边当前歌曲，中间控制按钮 + 进度条，右边随机 + 音量 */
+/** 底部播放栏：左边当前歌曲，中间控制按钮 + 进度条，右边单曲循环 / 随机 + 音量 */
 internal class PlayerBar(private val screen: MusicScreen, private val module: NeteaseMusicModule) {
     private val ui = screen.ui
 
@@ -30,11 +32,11 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
         ui.drawCover(coverBox, t?.let { CoverCache.track(it) }, 8f)
         val infoX = coverBox.right + 12f
         val infoW = 220f
-        val title = t?.name ?: "Not playing"
+        val title = t?.name ?: I18n.text("Not playing")
         ui.text(ui.trim(title, infoW, 14f, Theme.FONT_SEMIBOLD), infoX, coverBox.y + 9f, 14f, Theme.TEXT_PRIMARY, Theme.FONT_SEMIBOLD)
         val sub = when {
             t == null -> "-"
-            MusicPlayer.message.isNotEmpty() -> MusicPlayer.message
+            MusicPlayer.message.isNotEmpty() -> I18n.message(MusicPlayer.message)
             else -> t.artists.joinToString(" / ")
         }
         ui.text(ui.trim(sub, infoW, 11f), infoX, coverBox.y + 28f, 11f, Theme.TEXT_SECONDARY)
@@ -87,7 +89,7 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
             }
         }
 
-        // 右：随机 + 音量
+        // 右：单曲循环 / 随机 + 音量
         val vy = bar.y + bar.height / 2f
         volRect = LayoutBounds(bar.right - 30f - 110f, vy - 2f, 110f, 4f)
         speaker(volRect.x - 22f, vy, false)
@@ -97,13 +99,15 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
         val knobX = volRect.x + volRect.width * MusicPlayer.volume
         ctx.drawShape(LayoutBounds(knobX - 5f, volRect.y - 3f, 10f, 10f), ShapeStyle(Theme.TEXT_PRIMARY, 5f))
 
-        val shuffleLabel = "Shuffle"
-        val sw = ui.width(shuffleLabel, 11f, Theme.FONT_MEDIUM) + 36f
-        val shB = LayoutBounds(volRect.x - 40f - sw, vy - 13f, sw, 26f)
+        val shB = LayoutBounds(volRect.x - 72f, vy - 14f, 32f, 28f)
         ui.card(shB, if (MusicPlayer.shuffle) RED.copy(a = 0.85f) else if (ui.hover(shB)) Theme.CARD_HOVER else Color(1f, 1f, 1f, 0.07f), 9f)
-        ui.icon("⇄", shB.x + 13f, vy, 11f, Theme.TEXT_PRIMARY)
-        ui.text(shuffleLabel, shB.x + 24f, vy - 11f * 0.39f - 0.5f, 11f, Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
+        ui.icon("⇄", shB.x + 16f, vy, 14f, Theme.TEXT_PRIMARY)
         ui.hits += shB to { module.toggleShuffle() }
+
+        val repeatB = LayoutBounds(shB.x - 40f, vy - 14f, 32f, 28f)
+        ui.card(repeatB, if (MusicPlayer.repeatOne) RED.copy(a = 0.85f) else if (ui.hover(repeatB)) Theme.CARD_HOVER else Color(1f, 1f, 1f, 0.07f), 9f)
+        ui.icon("↻", repeatB.x + 16f, vy, 14f, Theme.TEXT_PRIMARY)
+        ui.hits += repeatB to { module.toggleRepeatOne() }
     }
 
     /** 小喇叭图标：方块 + 喇叭口，loud = 右边再加两道声波 */

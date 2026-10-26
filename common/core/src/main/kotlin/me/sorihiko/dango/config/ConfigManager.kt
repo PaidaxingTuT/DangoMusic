@@ -155,7 +155,8 @@ class ConfigManager(
                 fresh = false
             }
             ready = true
-            lastSaved = try { serialize() } catch (ex: Exception) { null }
+            // 也保存首次推断的语言和新增选项，避免下次启动时重新采用游戏语言。
+            saveIfChanged()
             return
         }
         if (ready && ticks % 40 == 0) saveIfChanged()

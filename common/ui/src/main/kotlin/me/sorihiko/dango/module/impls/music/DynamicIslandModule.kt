@@ -1,5 +1,7 @@
 package me.sorihiko.dango.module.impls.music
 
+import me.sorihiko.dango.i18n.I18n
+
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.event.EventHandler
 import me.sorihiko.dango.events.WorldRenderEndEvent
@@ -282,9 +284,9 @@ class DynamicIslandModule : Module() {
         val tw = b.right - 14f - tx
 
         val label = when (MusicPlayer.state) {
-            MusicPlayer.State.PAUSED -> "PAUSED"
-            MusicPlayer.State.LOADING -> "LOADING"
-            else -> "NOW PLAYING"
+            MusicPlayer.State.PAUSED -> I18n.text("PAUSED")
+            MusicPlayer.State.LOADING -> I18n.text("LOADING")
+            else -> I18n.text("NOW PLAYING")
         }
         text(ctx, label, tx, b.y + 11f, 9f, if (playing) Theme.ACCENT else Theme.TEXT_TERTIARY, Theme.FONT_SEMIBOLD)
         bars(ctx, b.right - 14f - 14f, b.y + 21f, playing, 10f)

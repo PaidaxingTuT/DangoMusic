@@ -16,6 +16,7 @@
   "entrypoints": {
     "client": ["me.sorihiko.dango.fabric.DangoMusicFabric"]
   },
+  "mixins": ["dangomusic.mixins.json"],
   "depends": {
     "fabricloader": ">=0.15.0",
     "fabric-api": "*",

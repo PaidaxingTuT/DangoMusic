@@ -1,5 +1,13 @@
 package me.sorihiko.dango.modern
 
+import com.mojang.blaze3d.platform.InputConstants
+
+import me.sorihiko.dango.platform.PlayerAction
+
+import me.sorihiko.dango.platform.Keys
+
+import net.minecraft.client.KeyMapping
+
 import me.sorihiko.dango.DangoLogger
 
 import com.mojang.blaze3d.ProjectionType
@@ -62,6 +70,21 @@ internal object GlCache {
  * 这里把这些差别补齐，让共用代码照旧直接用 OpenGL 画。
  */
 internal object McCompat {
+    private val playerKeyCategory by lazy { KeyMapping.Category.register(net.minecraft.resources.Identifier.fromNamespaceAndPath("dangomusic", "controls")) }
+
+    fun createPlayerKey(action: PlayerAction): KeyMapping =
+        KeyMapping(action.translationKey, gameBindingKey(action.defaultKey).value, playerKeyCategory)
+
+    fun gameBindingKey(code: Int): InputConstants.Key = when {
+        code == Keys.NONE -> InputConstants.UNKNOWN
+        code < 0 -> InputConstants.Type.MOUSE.getOrCreate(code + 100)
+        else -> InputConstants.Type.KEYSYM.getOrCreate(KeyMap.toGlfw(code))
+    }
+
+    fun commonBindingKey(key: InputConstants.Key): Int =
+        if (key.type == InputConstants.Type.MOUSE) Keys.mouse(key.value) else KeyMap.fromGlfw(key.value)
+
+
     private val mc: Minecraft get() = Minecraft.getInstance()
 
     /** 把原版的视图矩阵临时换成单位矩阵（原版画字时会读它） */
@@ -353,6 +376,7 @@ abstract class CompatScreen(title: Component) : Screen(title) {
     abstract fun onMouseReleased()
     abstract fun onScroll(delta: Double)
     abstract fun onKeyPressed(glfwKey: Int)
+    abstract fun onKeyReleased(glfwKey: Int)
     abstract fun onCharTyped(c: Char)
 
     /** 不要原版的模糊 / 变暗背景（玻璃自己会模糊背后的画面） */
@@ -384,6 +408,11 @@ abstract class CompatScreen(title: Component) : Screen(title) {
 
     override fun keyPressed(event: KeyEvent): Boolean {
         onKeyPressed(event.key())
+        return true
+    }
+
+    override fun keyReleased(event: KeyEvent): Boolean {
+        onKeyReleased(event.key())
         return true
     }
 

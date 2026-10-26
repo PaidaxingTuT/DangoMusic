@@ -3,6 +3,7 @@ package me.sorihiko.dango.legacy
 import me.sorihiko.dango.DangoMusic
 import me.sorihiko.dango.platform.Platform
 import me.sorihiko.dango.platform.PlayerPose
+import me.sorihiko.dango.platform.PlayerKeyBinding
 
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiChat
@@ -20,6 +21,8 @@ object LegacyPlatform : Platform {
 
     override val playerName: String get() = mc.session.username
 
+    override val languageCode: String? get() = mc.gameSettings?.language
+
     override val windowWidth: Int get() = mc.displayWidth
     override val windowHeight: Int get() = mc.displayHeight
 
@@ -29,10 +32,12 @@ object LegacyPlatform : Platform {
     override fun isMouseDown(button: Int): Boolean = Mouse.isButtonDown(button)
 
     override fun isKeyDown(key: Int): Boolean = try {
-        Keyboard.isKeyDown(key)
+        if (key in -100..-1) Mouse.isButtonDown(key + 100) else Keyboard.isKeyDown(key)
     } catch (_: Exception) {
         false
     }
+
+    override fun syncKeyBindings(bindings: List<PlayerKeyBinding>) = LegacyKeyBindings.sync(bindings)
 
     override val ctrlDown: Boolean get() = GuiScreen.isCtrlKeyDown()
 

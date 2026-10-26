@@ -1,6 +1,9 @@
 package me.sorihiko.dango.neoforge;
 
 import me.sorihiko.dango.modern.ModernDango;
+import me.sorihiko.dango.modern.ModernKeyBindings;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.Mod;
@@ -15,7 +18,8 @@ import net.neoforged.neoforge.common.NeoForge;
 @Mod(value = "dangomusic", dist = Dist.CLIENT)
 public class DangoMusicNeoForge {
 
-    public DangoMusicNeoForge() {
+    public DangoMusicNeoForge(IEventBus modBus) {
+        modBus.addListener((RegisterKeyMappingsEvent event) -> ModernKeyBindings.register(event::register));
         // 这个版本的 NeoForge 加载 mod 时游戏本体（Minecraft）还没创建，
         // 读配置文件夹等都要用到它，所以等第一个游戏 tick 再启动
         NeoForge.EVENT_BUS.addListener(DangoMusicNeoForge::onClientTick);

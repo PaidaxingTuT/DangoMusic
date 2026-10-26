@@ -51,6 +51,11 @@ class ModernMusicScreen(
         if (key != Keys.NONE) screen.keyTyped('\u0000', key)
     }
 
+    override fun onKeyReleased(glfwKey: Int) {
+        val key = KeyMap.fromGlfw(glfwKey)
+        if (key != Keys.NONE) screen.keyReleased(key)
+    }
+
     override fun onCharTyped(c: Char) {
         // 打字单独一个事件（1.8.9 是和按键一起来的）：键码给 NONE
         screen.keyTyped(c, Keys.NONE)
