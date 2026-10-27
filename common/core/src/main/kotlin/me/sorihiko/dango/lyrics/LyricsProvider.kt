@@ -181,6 +181,16 @@ object LyricsProvider {
      * 按网易云歌曲 ID 取歌词。优先拿逐字歌词（yrc，每个字都有时间，文闪用），
      * 拿不到再用普通 LRC。
      */
+    /**
+     * 根据歌曲对象获取歌词（支持网易云与酷狗音乐/概念版 KRC 逐字歌词）
+     */
+    fun getLyrics(track: me.sorihiko.dango.music.NeteaseTrack): Lyrics? {
+        if (me.sorihiko.dango.music.KugouApi.isKugou(track)) {
+            return me.sorihiko.dango.music.KugouApi.fetchLyrics(track)
+        }
+        return neteaseLyricById(track.id)
+    }
+
     fun neteaseLyricById(id: Long): Lyrics? {
         var lrcText: String? = null
         var yrcText: String? = null

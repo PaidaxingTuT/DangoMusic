@@ -2,7 +2,7 @@ package me.sorihiko.dango.musicui
 
 import me.sorihiko.dango.i18n.I18n
 
-import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
+import me.sorihiko.dango.module.impls.music.BaseMusicModule
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.MusicScreen
@@ -15,7 +15,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** 底部播放栏：左边当前歌曲，中间控制按钮 + 进度条，右边单曲循环 / 随机 + 音量 */
-internal class PlayerBar(private val screen: MusicScreen, private val module: NeteaseMusicModule) {
+internal class PlayerBar(private val screen: MusicScreen, private val module: BaseMusicModule) {
     private val ui = screen.ui
 
     private var progRect = LayoutBounds()

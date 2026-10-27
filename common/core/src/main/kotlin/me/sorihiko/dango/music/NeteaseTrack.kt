@@ -3,16 +3,32 @@ package me.sorihiko.dango.music
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 
-/** 网易云里的一首歌（ID、时长、封面都是网易云自己的数据） */
-class NeteaseTrack(
+/**
+ * 音乐音轨数据模型（兼容网易云与酷狗音乐平台）。
+ *
+ * @param id 唯一 ID（网易云为数字 ID，酷狗可根据 hash 生成哈希 ID）
+ * @param name 歌曲名称
+ * @param artists 歌手列表
+ * @param durationMs 时长（毫秒）
+ * @param coverUrl 封面图片 URL
+ * @param platform 来源平台 ("NetEase", "KuGou", "KuGou Lite")
+ * @param hash 酷狗专有的音频文件 Hash（用于获取播放链接、歌词等）
+ * @param albumAudioId 酷狗音轨所属的 album_audio_id
+ */
+open class NeteaseTrack(
     val id: Long,
     val name: String,
     val artists: List<String>,
     val durationMs: Long,
     val coverUrl: String,
+    val platform: String = "NetEase",
+    val hash: String = "",
+    val albumAudioId: Long = 0L,
 ) {
+    val artistText: String get() = if (artists.isEmpty()) "" else artists.joinToString(" / ")
+
     companion object {
-        /** 解析网易云接口返回的歌曲 JSON（新旧两种字段名都认：artists/ar、duration/dt、album/al） */
+        /** 解析网易云接口返回的歌曲 JSON */
         fun parse(track: JsonObject): NeteaseTrack? {
             val id = track.get("id")?.let { if (it.isJsonNull) null else it.asString.toLongOrNull() } ?: return null
             val name = str(track, "name")
@@ -28,7 +44,7 @@ class NeteaseTrack(
             val cover = if (album != null && album.isJsonObject) {
                 str(album.asJsonObject, "picUrl").ifEmpty { str(album.asJsonObject, "cover") }
             } else ""
-            return NeteaseTrack(id, name, artists, dur, cover)
+            return NeteaseTrack(id, name, artists, dur, cover, "NetEase")
         }
 
         private fun str(o: JsonObject, name: String): String {

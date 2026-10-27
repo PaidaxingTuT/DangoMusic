@@ -3,7 +3,7 @@ package me.sorihiko.dango.music
 import me.sorihiko.dango.i18n.I18n
 
 import me.sorihiko.dango.DangoClient
-import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
+import me.sorihiko.dango.module.impls.music.BaseMusicModule
 import me.sorihiko.dango.musicui.GridPage
 import me.sorihiko.dango.musicui.Library
 import me.sorihiko.dango.musicui.LoginDialog
@@ -37,7 +37,7 @@ import kotlin.math.min
  * 菜单字体（Inter）只有拉丁字符，所以中文（歌名、歌手、提示）和图标符号用 Minecraft 自带字体画。
  */
 class MusicScreen(
-    private val module: NeteaseMusicModule,
+    private val module: BaseMusicModule,
     /** 关掉这个界面（由平台层提供） */
     private val closeScreen: () -> Unit,
 ) {

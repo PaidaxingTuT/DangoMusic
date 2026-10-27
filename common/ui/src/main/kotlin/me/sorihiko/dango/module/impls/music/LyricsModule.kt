@@ -203,7 +203,7 @@ class LyricsModule : Module() {
         val id = s.track.id
         fetcher.execute {
             try {
-                cache[key] = LyricsProvider.neteaseLyricById(id) ?: NotFound
+                cache[key] = LyricsProvider.getLyrics(s.track) ?: NotFound
             } catch (_: Exception) {
                 cache[key] = NotFound
             } finally {

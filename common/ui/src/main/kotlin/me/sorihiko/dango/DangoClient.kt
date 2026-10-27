@@ -4,7 +4,10 @@ import me.sorihiko.dango.gfx.Gfx
 import me.sorihiko.dango.i18n.I18n
 import me.sorihiko.dango.module.impls.music.DynamicIslandModule
 import me.sorihiko.dango.module.impls.music.LyricsModule
+import me.sorihiko.dango.module.impls.music.BaseMusicModule
 import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
+import me.sorihiko.dango.module.impls.music.KugouMusicModule
+import me.sorihiko.dango.module.impls.music.KugouLiteMusicModule
 import me.sorihiko.dango.module.impls.music.SongCardModule
 import me.sorihiko.dango.music.MusicScreen
 import me.sorihiko.dango.platform.Platform
@@ -39,5 +42,5 @@ object DangoClient {
     /** 平台层打开播放器界面时用：新建一个播放器界面，[close] 由平台层提供（关掉这个界面） */
     @JvmStatic
     fun newMusicScreen(close: () -> Unit): MusicScreen =
-        MusicScreen(DangoMusic.instance.moduleManager.get(NeteaseMusicModule::class.java), close)
+        MusicScreen(DangoMusic.instance.moduleManager.get(BaseMusicModule::class.java), close)
 }

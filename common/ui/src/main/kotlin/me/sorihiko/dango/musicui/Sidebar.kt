@@ -6,6 +6,7 @@ import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicScreen
 import me.sorihiko.dango.music.NeteaseApi
+import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.party.ListenParty
 import me.sorihiko.dango.platform.Keys
 import me.sorihiko.dango.ui.LayoutBounds
@@ -168,25 +169,27 @@ internal class Sidebar(private val screen: MusicScreen) {
     private fun drawAccount(side: LayoutBounds) {
         val ub = LayoutBounds(side.x + 6f, side.bottom - 46f, side.width - 12f, 40f)
         val av = LayoutBounds(ub.x + 6f, ub.y + 6f, 28f, 28f)
-        if (NeteaseApi.loggedIn) {
-            val aurl = NeteaseApi.avatarUrl
-            ui.drawCover(av, if (aurl.isNotEmpty()) CoverCache.get("u:${NeteaseApi.userId}", aurl) else null, 14f)
-            val who = NeteaseApi.nickname.ifEmpty { I18n.text("Logged in") }
+        val svc = MusicServices.current
+        if (svc.loggedIn) {
+            val aurl = svc.avatarUrl
+            ui.drawCover(av, if (aurl.isNotEmpty()) CoverCache.get("u:${svc.userId}", aurl) else null, 14f)
+            val who = svc.nickname.ifEmpty { I18n.text("Logged in") }
+            val vipTag = if (svc.isVip) " [VIP]" else ""
             val outW = ui.width(I18n.text("Log out"), 10f, Theme.FONT_MEDIUM)
-            ui.text(ui.trim(who, ub.right - outW - 18f - (av.right + 10f), 12f), av.right + 10f, ub.y + 14f, 12f, Theme.TEXT_PRIMARY)
+            ui.text(ui.trim(who + vipTag, ub.right - outW - 18f - (av.right + 10f), 12f), av.right + 10f, ub.y + 14f, 12f, if (svc.isVip) RED else Theme.TEXT_PRIMARY)
             val outB = LayoutBounds(ub.right - outW - 14f, ub.y + 10f, outW + 10f, 20f)
             if (ui.hover(outB)) ui.card(outB, Theme.CARD_HOVER, 6f)
             ui.text(I18n.text("Log out"), outB.x + 5f, outB.y + 6f, 10f, Theme.TEXT_TERTIARY, Theme.FONT_MEDIUM)
             ui.hits += outB to {
-                NeteaseApi.logout()
+                svc.logout()
                 Library.refreshAll()
             }
         } else {
             if (ui.hover(ub)) ui.card(ub, Theme.CARD_HOVER, 10f)
             ui.ctx.drawShape(av, ShapeStyle(Theme.TRACK, 14f))
             ui.icon("?", av.x + 14f, av.y + 14f, 12f, Theme.TEXT_SECONDARY)
-            ui.text(I18n.text("Log in to NetEase"), av.right + 10f, ub.y + 14f, 12f, RED, Theme.FONT_SEMIBOLD)
-            ui.hits += ub to { screen.login.open() }
+            ui.text(I18n.text("登录 ") + svc.displayName, av.right + 10f, ub.y + 14f, 12f, RED, Theme.FONT_SEMIBOLD)
+            ui.hits += ub to { screen.login.open(svc.login) }
         }
     }
 

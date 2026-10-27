@@ -6,7 +6,7 @@ import me.sorihiko.dango.i18n.I18n
 import me.sorihiko.dango.module.Module
 import me.sorihiko.dango.module.impls.music.DynamicIslandModule
 import me.sorihiko.dango.module.impls.music.LyricsModule
-import me.sorihiko.dango.module.impls.music.NeteaseMusicModule
+import me.sorihiko.dango.module.impls.music.BaseMusicModule
 import me.sorihiko.dango.module.impls.music.SongCardModule
 import me.sorihiko.dango.module.values.BooleanValue
 import me.sorihiko.dango.module.values.FloatValue
@@ -26,7 +26,7 @@ import kotlin.math.roundToInt
  * 设置页（侧栏齿轮）：两个标签 Lyrics / Music & HUD，每个标签是若干分组卡片，两列瀑布流排开。
  * 直接读写各模块的 @ModuleValue，改了立刻生效，ConfigManager 会自动存盘。
  */
-internal class SettingsPage(private val screen: MusicScreen, private val module: NeteaseMusicModule) {
+internal class SettingsPage(private val screen: MusicScreen, private val module: BaseMusicModule) {
     private val ui = screen.ui
 
     private enum class Ctl { TOGGLE, SLIDER, SWATCH, KEY, LANGUAGE }

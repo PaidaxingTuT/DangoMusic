@@ -1,0 +1,27 @@
+package me.sorihiko.dango.music
+
+/**
+ * 音乐服务平台注册与调度中心。
+ * 统一管理当前激活的音乐服务实例。
+ */
+object MusicServices {
+
+    val NETEASE: MusicPlatformService = NeteasePlatformService
+    val KUGOU: MusicPlatformService = KugouPlatformService
+    val KUGOU_LITE: MusicPlatformService = KugouLitePlatformService
+
+    val all: List<MusicPlatformService> = listOf(NETEASE, KUGOU, KUGOU_LITE)
+
+    /** 当前选中的音乐平台服务，默认网易云 */
+    @Volatile
+    var current: MusicPlatformService = NETEASE
+        private set
+
+    fun select(service: MusicPlatformService) {
+        current = service
+    }
+
+    fun selectById(id: String) {
+        current = all.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: NETEASE
+    }
+}

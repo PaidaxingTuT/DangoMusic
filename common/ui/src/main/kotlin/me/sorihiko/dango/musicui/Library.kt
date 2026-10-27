@@ -2,6 +2,7 @@ package me.sorihiko.dango.musicui
 
 import me.sorihiko.dango.gfx.GuiCanvas
 import me.sorihiko.dango.music.NeteaseApi
+import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.music.NeteasePlaylist
 import me.sorihiko.dango.music.NeteaseTrack
 
@@ -88,7 +89,12 @@ internal object Library {
         if (recommend != null || recommendLoading) return
         recommendLoading = true
         worker.execute {
-            recommend = try { NeteaseApi.recommendPlaylists() } catch (_: Exception) { emptyList() }
+            val cur = LoginDialog.currentLogin
+            recommend = try {
+                if (cur == me.sorihiko.dango.music.KugouLogin) me.sorihiko.dango.music.KugouApi.recommendPlaylists(isLite = false)
+                else if (cur == me.sorihiko.dango.music.KugouLiteLogin) me.sorihiko.dango.music.KugouApi.recommendPlaylists(isLite = true)
+                else NeteaseApi.recommendPlaylists()
+            } catch (_: Exception) { emptyList() }
             recommendLoading = false
         }
     }
@@ -121,7 +127,14 @@ internal object Library {
         searchResults = null
         worker.execute {
             try {
-                searchResults = NeteaseApi.search(q)
+                val cur = LoginDialog.currentLogin
+                searchResults = if (cur == me.sorihiko.dango.music.KugouLogin) {
+                    me.sorihiko.dango.music.KugouApi.search(q, isLite = false)
+                } else if (cur == me.sorihiko.dango.music.KugouLiteLogin) {
+                    me.sorihiko.dango.music.KugouApi.search(q, isLite = true)
+                } else {
+                    NeteaseApi.search(q)
+                }
             } catch (_: Exception) {
                 searchResults = emptyList()
             } finally {

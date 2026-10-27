@@ -203,16 +203,31 @@ object MusicPlayer {
 
     private fun load(gen: Int, track: NeteaseTrack, startAt: (() -> Long)? = null, paused: Boolean = false) {
         try {
-            val url = NeteaseApi.songUrl(track.id)
-            if (gen != generation) return
-            if (url == null) return fail(gen, "拿不到播放地址")
-            val bytes = NeteaseApi.request(url.url)
-            if (gen != generation) return
-            if (bytes == null || bytes.size < 10_000) {
-                return fail(gen, if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
+            val bytes: ByteArray?
+            var isTrial = false
+            if (KugouApi.isKugou(track)) {
+                val directUrl = KugouApi.songUrl(track)
+                if (gen != generation) return
+                if (directUrl == null) return fail(gen, "拿不到播放地址")
+                bytes = NeteaseApi.request(directUrl)
+                if (gen != generation) return
+                if (bytes == null || bytes.size < 10_000) {
+                    val logged = if (track.platform.contains("Lite")) KugouLiteLogin.token.isNotEmpty() else KugouLogin.token.isNotEmpty()
+                    return fail(gen, if (logged) "这首歌没有播放权限" else "需要登录酷狗才能播放（VIP 歌曲）")
+                }
+            } else {
+                val url = NeteaseApi.songUrl(track.id)
+                if (gen != generation) return
+                if (url == null) return fail(gen, "拿不到播放地址")
+                bytes = NeteaseApi.request(url.url)
+                if (gen != generation) return
+                if (bytes == null || bytes.size < 10_000) {
+                    return fail(gen, if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
+                }
+                isTrial = url.trialOnly
             }
             audio = bytes
-            message = if (url.trialOnly) "仅试听片段" else ""
+            message = if (isTrial) "仅试听片段" else ""
             val start = (startAt?.invoke() ?: 0L).coerceIn(0L, max(0L, track.durationMs - 1000))
             if (paused) {
                 pausedAtMs = start
