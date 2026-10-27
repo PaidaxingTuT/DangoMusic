@@ -1,11 +1,6 @@
 name: Build DangoMusic Mod
 
-run-name: ${{ github.event_name == 'release' && format('Release {0}: {1}', github.event.release.tag_name, github.event.release.name || 'Release') || (github.event.ref_type == 'tag' && format('Build Tag {0}', github.ref_name)) || (github.event.inputs.title != '' && format('Build: {0}', github.event.inputs.title) || format('Manual Build ({0})', github.ref_name)) }}
-
 on:
-  push:
-    tags:
-      - 'v*'
   release:
     types: [ published ]
   workflow_dispatch:
