@@ -27,6 +27,9 @@ class KugouUserInfo(
     val isVip: Boolean,
 )
 
+/** 一次待发送的酷狗请求（账号接口用）。 */
+internal class KugouRequest(val url: String, val body: String, val headers: Map<String, String>)
+
 /**
  * 酷狗音乐 / 酷狗概念版 API 核心封装：
  * 标准版与概念版共用请求、签名和解析，具体实体仅提供各平台参数。
@@ -56,6 +59,7 @@ abstract class BaseKugouApi {
      * 获取用户信息（昵称、头像、VIP）
      */
     fun getUserInfo(userId: Long, token: String): KugouUserInfo {
+        require(userId > 0 && token.isNotEmpty()) { "Kugou credentials missing" }
         val now = System.currentTimeMillis() / 1000
         val plain = JsonObject().apply { addProperty("token", token); addProperty("clienttime", now) }.toString()
         val body = JsonObject().apply {
@@ -71,7 +75,7 @@ abstract class BaseKugouApi {
     }
 
     /** 账号接口统一注入身份参数，并把同一份 JSON 请求体纳入签名。 */
-    private fun accountPost(path: String, body: String, userId: Long, token: String, router: String = "cloudlist.service.kugou.com"): String? {
+    internal fun buildAccountRequest(path: String, body: String, userId: Long, token: String, router: String = "cloudlist.service.kugou.com"): KugouRequest {
         require(userId > 0 && token.isNotEmpty()) { "Kugou credentials missing" }
         val now = (System.currentTimeMillis() / 1000).toString()
         val params = linkedMapOf(
@@ -79,9 +83,18 @@ abstract class BaseKugouApi {
             "dfid" to "-", "mid" to "1", "uuid" to "-", "plat" to "1",
             "userid" to userId.toString(), "token" to token,
         )
-        return httpPost("https://gateway.kugou.com$path${signAndBuild(params, salt, body)}", body.toByteArray(StandardCharsets.UTF_8),
-            mapOf("x-router" to router, "mid" to "1", "dfid" to "-", "clienttime" to now, "Content-Type" to "application/json;charset=utf-8"))
+        return KugouRequest(
+            "https://gateway.kugou.com$path${signAndBuild(params, salt, body)}", body,
+            mapOf("x-router" to router, "mid" to "1", "dfid" to "-", "clienttime" to now, "Content-Type" to "application/json;charset=utf-8"),
+        )
     }
+
+    private fun accountPost(path: String, body: String, userId: Long, token: String, router: String = "cloudlist.service.kugou.com"): String? =
+        post(buildAccountRequest(path, body, userId, token, router))
+
+    /** 发送请求；测试里可替换成假的响应。 */
+    internal open fun post(request: KugouRequest): String? =
+        httpPost(request.url, request.body.toByteArray(StandardCharsets.UTF_8), request.headers)
 
     /**
      * 获取用户歌单列表（含“我喜欢的音乐”及自建歌单）
@@ -89,7 +102,14 @@ abstract class BaseKugouApi {
      */
     fun getUserPlaylists(userId: Long, token: String): List<NeteasePlaylist> {
         val items = pagedItems(50) { page ->
-            val postData = """{"userid":$userId,"token":"$token","total_ver":979,"type":2,"page":$page,"pagesize":50}"""
+            val postData = JsonObject().apply {
+                addProperty("userid", userId)
+                addProperty("token", token)
+                addProperty("total_ver", 979)
+                addProperty("type", 2)
+                addProperty("page", page)
+                addProperty("pagesize", 50)
+            }.toString()
             parsePage(accountPost("/v7/get_all_list", postData, userId, token))
         }
         return items.mapNotNull { o ->
@@ -107,7 +127,17 @@ abstract class BaseKugouApi {
      */
     fun getPlaylistTracks(listId: Long, userId: Long, token: String): List<NeteaseTrack> {
         val items = pagedItems(300) { page ->
-            val postData = """{"listid":$listId,"userid":$userId,"token":"$token","type":0,"page":$page,"pagesize":300,"area_code":1,"allplatform":1,"show_cover":1}"""
+            val postData = JsonObject().apply {
+                addProperty("listid", listId)
+                addProperty("userid", userId)
+                addProperty("token", token)
+                addProperty("type", 0)
+                addProperty("page", page)
+                addProperty("pagesize", 300)
+                addProperty("area_code", 1)
+                addProperty("allplatform", 1)
+                addProperty("show_cover", 1)
+            }.toString()
             parsePage(accountPost("/v4/get_list_all_file_v3", postData, userId, token))
         }
         return items.mapNotNull { parsePlaylistTrack(it) }
@@ -300,7 +330,8 @@ abstract class BaseKugouApi {
      * 获取音频播放直链：
      * 支持 VIP 权限、高码率歌曲、及 IsFreePart 试听/完整直链解析。
      */
-    fun songUrl(track: NeteaseTrack): String? {
+    fun songUrl(track: NeteaseTrack): SongUrl? {
+        login.credentialsReady()
         val hash = track.hash.ifEmpty { return null }.lowercase()
         val clienttime = (System.currentTimeMillis() / 1000).toString()
         val mid = "0"
@@ -355,12 +386,12 @@ abstract class BaseKugouApi {
                 val urlArr = root.getAsJsonArray("url")
                 if (urlArr != null && urlArr.size() > 0) {
                     val u = urlArr[0].asString
-                    if (u.isNotEmpty()) return u
+                    if (u.isNotEmpty()) return SongUrl(u, isFreePart == "1")
                 }
                 val backupArr = root.getAsJsonArray("backupUrl") ?: root.getAsJsonArray("backup_url")
                 if (backupArr != null && backupArr.size() > 0) {
                     val u = backupArr[0].asString
-                    if (u.isNotEmpty()) return u
+                    if (u.isNotEmpty()) return SongUrl(u, isFreePart == "1")
                 }
             } catch (e: Exception) {
                 DangoLogger.warn("Kugou song url parse failed: {}", e.toString())

@@ -65,8 +65,8 @@
 
 ## 构建
 
-### GitHub Actions CI 自动构建
-仓库配置了全版本自动构建工作流（`.github/workflows/build.yml`），每次推送或发版会自动打包涵盖 1.8.9 到 26.3 的所有 Forge / Fabric / NeoForge 模组 jar，并在工作流制品（Artifacts）中归档。
+### GitHub Actions 自动构建与发版
+仓库使用一个工作流（`.github/workflows/release.yml`）完成测试、全版本构建和发布。推送与 `version.properties` 一致的版本标签（例如 `v1.6.2`），或手动运行该工作流，成功后会自动上传 11 个版本的 JAR 并公开 Release。标题仅使用版本号，正文读取 `RELEASE_NOTES.md`；构建或附件校验失败时不会公开发布。
 
 ### 本地构建
 需要 JDK 8（1.8.9）、JDK 21（1.20.1～1.21.11）和 JDK 25（26.x）。`build-all.bat` 默认用 `C:\Program Files\Java\jdk-21`

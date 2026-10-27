@@ -45,6 +45,6 @@ abstract class BaseKugouPlatformService(
         if (playlist.kind == PlaylistKind.SPECIAL) api.getSpecialTracks(playlist.id)
         else api.getPlaylistTracks(playlist.id, userId, login.token)
     override fun search(keyword: String, limit: Int): List<NeteaseTrack> = api.search(keyword, page = 1, pageSize = limit)
-    override fun songUrl(track: NeteaseTrack): SongUrl? = api.songUrl(track)?.let { SongUrl(it) }
+    override fun songUrl(track: NeteaseTrack): SongUrl? = api.songUrl(track)
     override fun fetchLyrics(track: NeteaseTrack): Lyrics? = api.fetchLyrics(track)
 }

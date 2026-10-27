@@ -1,7 +1,6 @@
 package me.sorihiko.dango.music
 
 import com.google.gson.JsonParser
-import com.google.gson.JsonObject
 import me.sorihiko.dango.DangoLogger
 import me.sorihiko.dango.DangoMusic
 import java.io.File
@@ -54,18 +53,21 @@ abstract class BaseKugouLogin(
     private fun loadSavedCredentials() {
         try {
             val f = cookieFile
-            if (f.isFile) {
-                val lines = f.readLines(StandardCharsets.UTF_8)
-                for (line in lines) {
-                    val trimmed = line.trim()
-                    if (trimmed.startsWith("token=")) token = trimmed.substringAfter("token=")
-                    if (trimmed.startsWith("userid=")) userId = trimmed.substringAfter("userid=").toLongOrNull() ?: 0L
-                }
+            if (!f.isFile) return
+            val values = f.readLines(StandardCharsets.UTF_8).associate { line ->
+                line.trim().substringBefore("=") to line.trim().substringAfter("=", "")
+            }
+            val savedToken = values["token"].orEmpty()
+            val savedId = values["userid"]?.toLongOrNull() ?: 0L
+            if (savedToken.isNotEmpty() && savedId > 0) {
+                token = savedToken
+                userId = savedId
             }
         } catch (_: Exception) {}
     }
 
     fun saveCredentials(token: String, userId: Long) {
+        require(token.isNotEmpty() && userId > 0) { "Kugou credentials incomplete" }
         this.token = token
         this.userId = userId
         try {
@@ -137,6 +139,7 @@ abstract class BaseKugouLogin(
                 )
                 val checkUrl = "https://login-user.kugou.com/v2/get_userinfo_qrcode" + signAndBuildQuery(checkParams)
                 val checkResp = httpGet(checkUrl) ?: continue
+                if (mySession != session) return
                 val respObj = JsonParser().parse(checkResp).asJsonObject
                 val status = respObj.getAsJsonObject("data")?.get("status")?.asInt ?: continue
 
@@ -151,7 +154,7 @@ abstract class BaseKugouLogin(
                         val dataObj = respObj.getAsJsonObject("data")
                         val gotToken = dataObj.get("token")?.asString ?: ""
                         val gotUserId = dataObj.get("userid")?.asLong ?: 0L
-                        if (gotToken.isNotEmpty()) {
+                        if (gotToken.isNotEmpty() && gotUserId > 0L) {
                             saveCredentials(gotToken, gotUserId)
                             state = State.SUCCESS
                         } else {
