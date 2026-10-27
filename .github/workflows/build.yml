@@ -1,16 +1,19 @@
 name: Build DangoMusic Mod
 
-run-name: ${{ github.event_name == 'release' && format('Release {0}: {1}', github.event.release.tag_name, github.event.release.name || '发布新版本') || (github.event.inputs.title != '' && format('构建: {0}', github.event.inputs.title) || format('手动触发构建 ({0})', github.ref_name)) }}
+run-name: ${{ github.event_name == 'release' && format('Release {0}: {1}', github.event.release.tag_name, github.event.release.name || 'Release') || (github.event.ref_type == 'tag' && format('Build Tag {0}', github.ref_name)) || (github.event.inputs.title != '' && format('Build: {0}', github.event.inputs.title) || format('Manual Build ({0})', github.ref_name)) }}
 
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [ published ]
   workflow_dispatch:
     inputs:
       title:
-        description: '构建描述 / 变更特性 (例如: 添加酷狗音乐 / 添加QQ音乐)'
+        description: 'Build Description'
         required: false
-        default: '添加酷狗音乐及概念版支持'
+        default: 'Add KuGou & KuGou Lite Support'
         type: string
 
 jobs:
