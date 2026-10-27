@@ -185,10 +185,7 @@ object LyricsProvider {
      * 根据歌曲对象获取歌词（支持网易云与酷狗音乐/概念版 KRC 逐字歌词）
      */
     fun getLyrics(track: me.sorihiko.dango.music.NeteaseTrack): Lyrics? {
-        if (me.sorihiko.dango.music.KugouApi.isKugou(track)) {
-            return me.sorihiko.dango.music.KugouApi.fetchLyrics(track)
-        }
-        return neteaseLyricById(track.id)
+        return me.sorihiko.dango.music.MusicServices.forTrack(track).fetchLyrics(track)
     }
 
     fun neteaseLyricById(id: Long): Lyrics? {

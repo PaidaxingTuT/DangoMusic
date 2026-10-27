@@ -41,6 +41,12 @@ abstract class BaseKugouLogin(
     @Volatile var userId: Long = 0L
         private set
 
+    /** 用户 ID 或 token 还没准备好时也强制重新读一次磁盘。 */
+    fun credentialsReady(): Boolean {
+        if (token.isEmpty() || userId == 0L) loadSavedCredentials()
+        return token.isNotEmpty() && userId != 0L
+    }
+
     init {
         loadSavedCredentials()
     }

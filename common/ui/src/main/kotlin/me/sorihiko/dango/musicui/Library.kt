@@ -72,10 +72,14 @@ internal object Library {
         d.status = "正在读取歌单…"
         worker.execute {
             try {
-                d.service.resolveUser()
+                val profileLoaded = runCatching { d.service.resolveUser() }.isSuccess
                 val list = d.service.userPlaylists()
                 d.playlists = list
-                d.status = if (list.isEmpty()) "没有读到歌单（检查网络或登录）" else ""
+                d.status = when {
+                    list.isEmpty() -> "没有读到歌单（检查网络或登录）"
+                    !profileLoaded -> "读取账号信息失败（请重试或重新登录）"
+                    else -> ""
+                }
             } catch (_: Exception) {
                 d.status = "读取歌单失败"
             } finally {
@@ -143,6 +147,7 @@ internal object Library {
         d.lastLoadAt = System.currentTimeMillis()
         worker.execute {
             try {
+                runCatching { d.service.resolveUser() }
                 d.playlists = d.service.userPlaylists()
             } catch (_: Exception) {
             }

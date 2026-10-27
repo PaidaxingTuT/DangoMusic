@@ -14,19 +14,8 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 
-/** 网易云红（和菜单里 Music 分类同色） */
-/** 各音乐平台主题主色（强调色） */
-internal object MusicPlatformColors {
-    /** 网易云音乐：粉红色 / 洋红 (iOS System Pink) */
-    val NETEASE = Color.fromHex("#FF375F")
-    /** 酷狗音乐：淡蓝色 */
-    val KUGOU = Color.fromHex("#33A3F5")
-    /** 酷狗音乐概念版：淡蓝色 */
-    val KUGOU_LITE = Color.fromHex("#33A3F5")
-}
-
 /** 播放器当前平台的主色（可随选中的平台动态切换） */
-internal var ACCENT_COLOR: Color = MusicPlatformColors.NETEASE
+internal var ACCENT_COLOR: Color = Color.fromHex("#FF375F")
 
 /** 兼容旧代码引用的网易云红 / 界面主色 */
 internal val RED: Color get() = ACCENT_COLOR

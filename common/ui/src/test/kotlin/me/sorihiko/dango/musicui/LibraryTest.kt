@@ -1,8 +1,11 @@
 package me.sorihiko.dango.musicui
 
+import me.sorihiko.dango.lyrics.Lyrics
 import me.sorihiko.dango.music.MusicPlatformService
 import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.music.NeteasePlaylist
+import me.sorihiko.dango.music.NeteaseTrack
+import me.sorihiko.dango.music.SongUrl
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
@@ -18,7 +21,13 @@ class LibraryTest {
         val newStarted = CountDownLatch(1)
         val newRelease = CountDownLatch(1)
         fun service(name: String, started: CountDownLatch, release: CountDownLatch) =
-            object : MusicPlatformService by MusicServices.NETEASE {
+            object : MusicPlatformService() {
+                override val id = name
+                override val displayName = name
+                override val login get() = MusicServices.NETEASE.login
+                override val loggedIn = false
+                override val userId = 0L
+                override fun logout() {}
                 override fun resolveUser() = 0L
                 override fun userPlaylists(): List<NeteasePlaylist> {
                     started.countDown()
@@ -26,6 +35,16 @@ class LibraryTest {
                     return listOf(NeteasePlaylist(1, name, 0, "", true))
                 }
                 override fun recommendPlaylists() = emptyList<NeteasePlaylist>()
+                override val trackPlatform = "Test"
+                override val accentColor = "#FF0000"
+                override val nickname = name
+                override val avatarUrl = ""
+                override val isVip = false
+                override fun toplists() = emptyList<NeteasePlaylist>()
+                override fun playlistTracks(playlist: NeteasePlaylist) = emptyList<NeteaseTrack>()
+                override fun search(keyword: String, limit: Int) = emptyList<NeteaseTrack>()
+                override fun songUrl(track: NeteaseTrack): SongUrl? = null
+                override fun fetchLyrics(track: NeteaseTrack): Lyrics? = null
             }
         try {
             MusicServices.select(service("old", oldStarted, oldRelease))

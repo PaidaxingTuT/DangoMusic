@@ -6,8 +6,11 @@ import me.sorihiko.dango.lyrics.LyricsProvider
 /**
  * 网易云音乐平台服务实现。
  */
-object NeteasePlatformService : MusicPlatformService {
+object NeteasePlatformService : MusicPlatformService() {
     override val id: String = "netease"
+    override val trackPlatform = "NetEase"
+    override val accentColor = "#FF375F"
+    override val searchError: String get() = NeteaseApi.lastSearchError
     override val displayName: String = "网易云音乐"
     override val login: AccountLogin = NeteaseLogin
 
@@ -26,6 +29,6 @@ object NeteasePlatformService : MusicPlatformService {
     override fun playlistTracks(playlist: NeteasePlaylist): List<NeteaseTrack> = NeteaseApi.playlistTracks(playlist.id)
     override fun search(keyword: String, limit: Int): List<NeteaseTrack> = NeteaseApi.search(keyword, limit)
 
-    override fun songUrl(track: NeteaseTrack): String? = NeteaseApi.songUrl(track.id)?.url
+    override fun songUrl(track: NeteaseTrack): SongUrl? = NeteaseApi.songUrl(track.id)
     override fun fetchLyrics(track: NeteaseTrack): Lyrics? = LyricsProvider.neteaseLyricById(track.id)
 }

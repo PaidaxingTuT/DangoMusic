@@ -1,15 +1,7 @@
 name: Build DangoMusic Mod
 
 on:
-  release:
-    types: [ published ]
   workflow_dispatch:
-    inputs:
-      title:
-        description: 'Build Description'
-        required: false
-        default: 'Build current version'
-        type: string
 
 jobs:
   build-modern:

@@ -2,65 +2,49 @@ package me.sorihiko.dango.music
 
 import me.sorihiko.dango.lyrics.Lyrics
 
-/**
- * 酷狗音乐基础平台服务抽象（酷狗标准版和概念版共用大部分接口协议与解析）。
- */
+/** 酷狗标准版与概念版共用账号状态及业务逻辑，具体实体提供各自 API。 */
 abstract class BaseKugouPlatformService(
     override val id: String,
     override val displayName: String,
-    val isLite: Boolean,
-    override val login: BaseKugouLogin,
-) : MusicPlatformService {
+    private val api: BaseKugouApi,
+) : MusicPlatformService() {
+    override val login: BaseKugouLogin get() = api.login
+    override val trackPlatform: String get() = api.trackPlatform
+    override val accentColor = "#33A3F5"
+    override val loggedIn: Boolean get() = login.credentialsReady()
+    override val userId: Long get() { login.credentialsReady(); return login.userId }
 
-    override val loggedIn: Boolean get() = login.token.isNotEmpty()
-    override val userId: Long get() = login.userId
-    @Volatile override var nickname: String = ""
-        protected set
-    @Volatile override var avatarUrl: String = ""
-        protected set
-    @Volatile override var isVip: Boolean = false
-        protected set
+    private class Profile(val userId: Long, val token: String, val info: KugouUserInfo)
+    @Volatile private var profile: Profile? = null
+    private val info: KugouUserInfo?
+        get() = profile?.takeIf { it.userId == userId && it.token == login.token }?.info
+    override val nickname: String get() = info?.nickname ?: ""
+    override val avatarUrl: String get() = info?.avatar ?: ""
+    override val isVip: Boolean get() = info?.isVip ?: false
 
     override fun resolveUser(): Long {
         if (!loggedIn) return 0L
-        if (nickname.isNotEmpty()) return userId
-        // 获取用户资料
-        val info = KugouApi.getUserInfo(userId, login.token, isLite)
-        if (info != null) {
-            nickname = info.nickname
-            avatarUrl = info.avatar
-            isVip = info.isVip
-        } else {
-            nickname = "酷狗用户_${userId % 10000}"
-        }
-        return userId
+        if (info != null) return userId
+        val uid = userId
+        val token = login.token
+        val loaded = api.getUserInfo(uid, token)
+        if (uid == userId && token == login.token) profile = Profile(uid, token, loaded)
+        return uid
     }
 
     override fun logout() {
         login.logout()
-        nickname = ""
-        avatarUrl = ""
-        isVip = false
+        profile = null
     }
 
-    override fun userPlaylists(): List<NeteasePlaylist> {
-        if (!loggedIn) return emptyList()
-        return KugouApi.getUserPlaylists(userId, login.token, isLite)
-    }
-
-    override fun recommendPlaylists(): List<NeteasePlaylist> = KugouApi.recommendPlaylists(isLite)
-    override fun toplists(): List<NeteasePlaylist> = KugouApi.recommendPlaylists(isLite)
-
-    override fun playlistTracks(playlist: NeteasePlaylist): List<NeteaseTrack> {
-        return if (playlist.kind == PlaylistKind.SPECIAL) KugouApi.getSpecialTracks(playlist.id, isLite)
-        else KugouApi.getPlaylistTracks(playlist.id, userId, login.token, isLite)
-    }
-
-    override fun search(keyword: String, limit: Int): List<NeteaseTrack> {
-        return KugouApi.search(keyword, isLite, page = 1, pageSize = limit)
-    }
-
-    override fun songUrl(track: NeteaseTrack): String? = KugouApi.songUrl(track)
-
-    override fun fetchLyrics(track: NeteaseTrack): Lyrics? = KugouApi.fetchLyrics(track)
+    override fun userPlaylists(): List<NeteasePlaylist> =
+        if (loggedIn) api.getUserPlaylists(userId, login.token) else emptyList()
+    override fun recommendPlaylists(): List<NeteasePlaylist> = api.recommendPlaylists()
+    override fun toplists(): List<NeteasePlaylist> = api.recommendPlaylists()
+    override fun playlistTracks(playlist: NeteasePlaylist): List<NeteaseTrack> =
+        if (playlist.kind == PlaylistKind.SPECIAL) api.getSpecialTracks(playlist.id)
+        else api.getPlaylistTracks(playlist.id, userId, login.token)
+    override fun search(keyword: String, limit: Int): List<NeteaseTrack> = api.search(keyword, page = 1, pageSize = limit)
+    override fun songUrl(track: NeteaseTrack): SongUrl? = api.songUrl(track)?.let { SongUrl(it) }
+    override fun fetchLyrics(track: NeteaseTrack): Lyrics? = api.fetchLyrics(track)
 }

@@ -1,0 +1,156 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-modern:
+    name: Build 1.20.1 ~ 1.21.x (Fabric / Forge / NeoForge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Make gradlew executable
+        run: chmod +x modern/gradlew
+
+      - name: Test Common
+        working-directory: modern
+        run: ./gradlew -p ../common :core:test :ui:test --no-daemon
+
+      - name: Build Modern
+        working-directory: modern
+        run: ./gradlew build --no-daemon
+
+      - name: Collect Modern Jars
+        run: |
+          mkdir -p output
+          for d in modern/versions/*; do
+            if [ -d "$d/build/libs" ]; then
+              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" ! -name "*-dev-shadow.jar" -exec cp {} output/ \;
+            fi
+          done
+          test "$(find output -maxdepth 1 -name '*.jar' | wc -l)" -eq 6
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-Modern
+          path: output/*.jar
+
+  build-modern26:
+    name: Build 26.x (Fabric / NeoForge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Make gradlew executable
+        run: chmod +x modern26/gradlew
+
+      - name: Build 26.x
+        working-directory: modern26
+        run: ./gradlew build --no-daemon
+
+      - name: Collect 26.x Jars
+        run: |
+          mkdir -p output
+          for d in modern26/versions/*; do
+            if [ -d "$d/build/libs" ]; then
+              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" ! -name "*-dev-shadow.jar" -exec cp {} output/ \;
+            fi
+          done
+          test "$(find output -maxdepth 1 -name '*.jar' | wc -l)" -eq 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-26.x
+          path: output/*.jar
+
+  build-legacy:
+    name: Build 1.8.9 (Forge)
+    needs: [build-modern]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Download Modern Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: DangoMusic-Modern
+          path: output
+
+      - name: Package 1.8.9 Jar
+        run: python .github/scripts/patch_189.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-1.8.9
+          path: output_189/*.jar
+
+  release:
+    name: Publish Release
+    needs: [build-modern, build-modern26, build-legacy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG" ] || [ "$TAG" = "$GITHUB_REF" ]; then
+            TAG="v$(sed -n 's/^version=//p' version.properties)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download Built Jars
+        uses: actions/download-artifact@v4
+        with:
+          pattern: DangoMusic-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify artifacts
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -name "DangoMusic-${VERSION}+*.jar" ! -name "*-sources.jar" | wc -l)" -eq 11
+          for jar in dist/*.jar; do
+            case "$(basename "$jar")" in
+              DangoMusic-"${VERSION}"+*.jar) ;;
+              *) echo "Unexpected artifact: $jar"; exit 1 ;;
+            esac
+          done
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA"
+          gh release upload "$TAG" dist/*.jar --clobber

@@ -6,6 +6,5 @@ package me.sorihiko.dango.music
 object KugouLitePlatformService : BaseKugouPlatformService(
     id = "kugou_lite",
     displayName = "酷狗概念版",
-    isLite = true,
-    login = KugouLiteLogin,
+    api = KugouLiteApi,
 )

@@ -5,8 +5,6 @@ import me.sorihiko.dango.i18n.I18n
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.gfx.Texture
 import me.sorihiko.dango.music.AccountLogin
-import me.sorihiko.dango.music.KugouLiteLogin
-import me.sorihiko.dango.music.KugouLogin
 import me.sorihiko.dango.music.MusicScreen
 import me.sorihiko.dango.music.NeteaseLogin
 import me.sorihiko.dango.music.MusicServices
@@ -34,19 +32,15 @@ internal class LoginDialog(private val screen: MusicScreen) {
         var currentLogin: AccountLogin = NeteaseLogin
             private set
 
-        val availableLogins = listOf(NeteaseLogin, KugouLogin, KugouLiteLogin)
+        val availableLogins get() = MusicServices.all.map { it.login }
 
         fun selectLogin(login: AccountLogin) {
             if (currentLogin != login) {
                 currentLogin.cancel()
                 currentLogin = login
                 qrUploaded = -1
+                MusicServices.select(MusicServices.forLogin(login))
                 updateAccentColor()
-                when (login) {
-                    NeteaseLogin -> MusicServices.select(MusicServices.NETEASE)
-                    KugouLogin -> MusicServices.select(MusicServices.KUGOU)
-                    KugouLiteLogin -> MusicServices.select(MusicServices.KUGOU_LITE)
-                }
                 Library.refreshAll()
                 if (showing) {
                     currentLogin.start()
@@ -55,12 +49,7 @@ internal class LoginDialog(private val screen: MusicScreen) {
         }
 
         private fun updateAccentColor() {
-            ACCENT_COLOR = when (currentLogin) {
-                NeteaseLogin -> MusicPlatformColors.NETEASE
-                KugouLogin -> MusicPlatformColors.KUGOU
-                KugouLiteLogin -> MusicPlatformColors.KUGOU_LITE
-                else -> MusicPlatformColors.NETEASE
-            }
+            ACCENT_COLOR = Color.fromHex(MusicServices.current.accentColor)
         }
     }
 

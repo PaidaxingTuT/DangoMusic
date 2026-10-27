@@ -6,7 +6,7 @@ import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.MusicScreen
-import me.sorihiko.dango.music.NeteaseApi
+import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.music.NeteaseTrack
 import me.sorihiko.dango.platform.Keys
 import me.sorihiko.dango.ui.LayoutBounds
@@ -218,7 +218,7 @@ internal class TracksPage(private val screen: MusicScreen) {
         val sub = when {
             state.page == Page.SEARCH && Library.searching -> I18n.text("Searching...")
             state.page == Page.SEARCH && tracks.isNullOrEmpty() ->
-                if (NeteaseApi.lastSearchError.isNotEmpty()) I18n.text("Search failed: ") + NeteaseApi.lastSearchError else I18n.text("No results")
+                if (MusicServices.current.searchError.isNotEmpty()) I18n.text("Search failed: ") + MusicServices.current.searchError else I18n.text("No results")
             state.page == Page.QUEUE && tracks.isNullOrEmpty() -> I18n.text("Nothing in the queue yet")
             tracks == null -> I18n.text("Loading...")
             filterText.isNotEmpty() -> I18n.format("%d of %d songs", shown(tracks).size, tracks.size)

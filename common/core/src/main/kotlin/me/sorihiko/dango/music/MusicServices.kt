@@ -21,6 +21,13 @@ object MusicServices {
         current = service
     }
 
+    fun forTrack(track: NeteaseTrack): MusicPlatformService =
+        all.firstOrNull { it.trackPlatform == track.platform }
+            ?: error("Unknown music platform: ${track.platform}")
+
+    fun forLogin(login: AccountLogin): MusicPlatformService =
+        all.first { it.login === login }
+
     fun selectById(id: String) {
         current = all.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: NETEASE
     }
