@@ -147,8 +147,9 @@ modern26/            26.x 的构建（Minecraft 不再混淆，换了一套构�
 
 ## 第三方与致谢
 
-- [MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic)（GPL-3.0）：酷狗音乐接口与协议参考
+- [MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic)（GPL-2.0）：酷狗音乐接口与协议参考
 - [EchoMusic](https://github.com/hoowhoami/EchoMusic)（GPL-3.0）：酷狗音乐概念版接口与协议参考
+- [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)（MIT）：酷狗音乐相关接口参考
 - [Inter](https://github.com/rsms/inter)（SIL Open Font License 1.1），[Roboto Slab](https://fonts.google.com/specimen/Roboto+Slab)（Apache License 2.0）
 - [JLayer](http://www.javazoom.net/javalayer/javalayer.html)（LGPL）：MP3 解码
 - [ZXing](https://github.com/zxing/zxing)（Apache License 2.0）：登录二维码
