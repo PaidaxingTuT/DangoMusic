@@ -1,11 +1,17 @@
 name: Build DangoMusic Mod
 
+run-name: ${{ github.event_name == 'release' && format('Release {0}: {1}', github.event.release.tag_name, github.event.release.name || '发布新版本') || (github.event.inputs.title != '' && format('构建: {0}', github.event.inputs.title) || format('手动触发构建 ({0})', github.ref_name)) }}
+
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  release:
+    types: [ published ]
   workflow_dispatch:
+    inputs:
+      title:
+        description: '构建描述 / 变更特性 (例如: 添加酷狗音乐 / 添加QQ音乐)'
+        required: false
+        default: '添加酷狗音乐及概念版支持'
+        type: string
 
 jobs:
   build-modern:
@@ -146,3 +152,9 @@ jobs:
         with:
           name: DangoMusic-All-Versions
           path: dist/*.jar
+
+      - name: Attach Jars to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.jar

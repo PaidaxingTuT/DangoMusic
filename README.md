@@ -145,8 +145,10 @@ modern26/            26.x 的构建（Minecraft 不再混淆，换了一套构�
 - 本模组使用各音乐平台的公开接口，仅供个人学习交流；歌曲与歌词版权归各平台和版权方所有
 - 部分海外地区或 VIP 专享歌曲需要对应平台的会员权限
 
-## 第三方
+## 第三方与致谢
 
+- [MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic)（GPL-3.0）：酷狗音乐接口与协议参考
+- [EchoMusic](https://github.com/hoowhoami/EchoMusic)（GPL-3.0）：酷狗音乐概念版接口与协议参考
 - [Inter](https://github.com/rsms/inter)（SIL Open Font License 1.1），[Roboto Slab](https://fonts.google.com/specimen/Roboto+Slab)（Apache License 2.0）
 - [JLayer](http://www.javazoom.net/javalayer/javalayer.html)（LGPL）：MP3 解码
 - [ZXing](https://github.com/zxing/zxing)（Apache License 2.0）：登录二维码
