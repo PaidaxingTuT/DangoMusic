@@ -16,7 +16,7 @@ public class EventManager {
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
 
     public void addListener(Listener listener) {
-        for (Method method : listener.getClass().getDeclaredMethods()) {
+        for (Method method : listener.getClass().getMethods()) {
             method.setAccessible(true);
             EventHandler config = method.getAnnotation(EventHandler.class);
             if (config == null) continue;

@@ -14,9 +14,7 @@ import me.sorihiko.dango.module.ModuleManager
 import me.sorihiko.dango.module.values.BooleanValue
 import me.sorihiko.dango.module.values.FloatValue
 import me.sorihiko.dango.module.values.IntValue
-import me.sorihiko.dango.module.values.ModuleValue
 
-import java.lang.reflect.Field
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -42,11 +40,6 @@ class ConfigManager(
 
     private fun modules(): List<Module> = moduleManager.modules.values.flatten()
 
-    private fun valueFields(module: Module): List<Field> =
-        module.javaClass.declaredFields.filter {
-            it.isAnnotationPresent(ModuleValue::class.java)
-        }.onEach { it.isAccessible = true }
-
     // ---------------------------------------------------------------- 读取
 
     /** 第一次运行（没有配置文件）：所有功能默认打开 */
@@ -68,7 +61,7 @@ class ConfigManager(
                 (obj.get("enabled") as? JsonPrimitive)?.let { enabledMap[module] = it.asBoolean }
 
                 val values = obj.get("values") as? JsonObject ?: continue
-                for (field in valueFields(module)) {
+                for (field in module.valueFields()) {
                     val json = values.get(field.name) ?: continue
                     try {
                         applyValue(field.get(module), json)
@@ -100,7 +93,7 @@ class ConfigManager(
             val obj = JsonObject()
             obj.addProperty("enabled", module.enabled)
             val values = JsonObject()
-            for (field in valueFields(module)) {
+            for (field in module.valueFields()) {
                 when (val v = field.get(module)) {
                     is BooleanValue -> values.addProperty(field.name, v.get())
                     is IntValue -> values.addProperty(field.name, v.value)

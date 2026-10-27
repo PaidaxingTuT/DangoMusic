@@ -2,6 +2,6 @@
 dependencies {
     "api"(project(":core"))
     "testImplementation"(kotlin("test-junit"))
-    "testRuntimeOnly"("com.google.code.gson:gson:2.2.4")
+    "testImplementation"("com.google.code.gson:gson:2.2.4")
     "testRuntimeOnly"("org.apache.logging.log4j:log4j-api:2.0-beta9")
 }

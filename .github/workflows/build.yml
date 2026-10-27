@@ -8,7 +8,7 @@ on:
       title:
         description: 'Build Description'
         required: false
-        default: 'Build v1.6.0'
+        default: 'Build current version'
         type: string
 
 jobs:

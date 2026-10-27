@@ -144,7 +144,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
     private fun fieldsOf(m: Module): LinkedHashMap<String, Pair<ModuleValue, Any>> {
         val out = LinkedHashMap<String, Pair<ModuleValue, Any>>()
-        for (f in m.javaClass.declaredFields) {
+        for (f in m.valueFields()) {
             val ann = f.getAnnotation(ModuleValue::class.java) ?: continue
             f.isAccessible = true
             val v = f.get(m) ?: continue
