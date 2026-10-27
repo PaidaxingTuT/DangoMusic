@@ -2,9 +2,9 @@
 
 # Dango Music
 
-在 Minecraft 里听网易云音乐的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 · 1.21.11 · 26.2 · 26.3 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
+在 Minecraft 里听网易云音乐、酷狗音乐与酷狗音乐概念版的 mod（1.8.9 Forge / 1.20.1 Fabric · Forge / 1.21.1 · 1.21.11 · 26.2 · 26.3 Fabric · NeoForge）：液态玻璃风格的播放器、漂浮在世界里的 3D 歌词、Song card、灵动岛，还能和朋友一起听歌。
 
-*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1, 1.21.11, 26.2 & 26.3 Fabric & NeoForge) that brings a NetEase Cloud Music player into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
+*A Minecraft mod (1.8.9 Forge / 1.20.1 Fabric & Forge / 1.21.1, 1.21.11, 26.2 & 26.3 Fabric & NeoForge) that brings NetEase Cloud Music, KuGou Music and KuGou Lite players into Minecraft — liquid-glass UI, 3D in-world lyrics, a song card HUD, a Dynamic Island and Listen Together.*
 
 ## 截图
 
@@ -23,8 +23,12 @@
 
 ## 功能
 
+- **多音乐平台支持**（在播放器侧栏一键无缝切换平台）：
+  - **网易云音乐 (NetEase Cloud Music)**：经典粉红主题、每日推荐、排行榜、歌单收藏、扫码登录、会员权限标识
+  - **酷狗音乐 (KuGou Music)**：清爽天蓝主题、酷狗热歌/飙升榜、我的创建与收藏歌单、官方扫码登录认证、VIP 标识
+  - **酷狗音乐概念版 (KuGou Lite)**：概念版专属精选歌单、个性化推荐、官方扫码登录认证、双通道音源解析
 - **播放器**（默认按 `M` 打开）：每日推荐、排行榜、我的歌单、搜索；列表 / 封面墙两种视图；歌单内筛选、一键定位到正在播放；平滑滚动和切换动画
-- **歌词**：网易云逐字歌词（yrc）
+- **歌词**：支持网易云逐字歌词（yrc）与酷狗逐字歌词（KRC 实时解密转换）
   - 3D 歌词漂浮在世界里，跟着演唱一句句出现，暂停时自动隐藏
   - Deep Glow 发光、Wiggle 抖动、文闪、Word pop
   - 自动拆开"两句写在一行"的歌词
@@ -32,11 +36,11 @@
 - **灵动岛**：屏幕顶部显示正在播放，切歌时展开
 - **一起听歌**：开房间、分享房间码，所有人自动同步到同一首歌、同一秒（基于 Firebase）
 - **设置**：都在播放器侧栏的 ⚙ 里；可以绑定快捷键（播放 / 暂停、上一首、下一首、音量、开关歌词）
-- 网易云扫码登录（VIP 歌曲需要会员账号）
+- **多平台扫码登录**：各平台均支持通过手机 App 扫码登录，自动同步账号昵称、头像与 VIP 会员状态
 
 ## 安装
 
-按游戏版本选 jar（在 [Releases](https://github.com/Sorihiko/DangoMusic/releases) 下载）：
+按游戏版本选 jar（在 [Releases](https://github.com/PaidaxingTuT/DangoMusic/releases) 或 GitHub Actions Artifacts 下载）：
 
 | 版本 | 文件 | 需要 |
 |---|---|---|
@@ -53,7 +57,7 @@
 | 26.3 NeoForge | `DangoMusic-x.x.x+26.3-neoforge.jar` | NeoForge 26.3.x |
 
 1. 把对应的 jar 放进 `.minecraft/mods`（Fabric 版还要放 Fabric API）
-2. 进游戏按 `M`，点左下角扫码登录网易云
+2. 进游戏按 `M` 打开播放器，可在侧栏切换平台并点击左下角头像扫码登录
 
 配置、登录凭证、缓存都存在 `.minecraft/config/dangomusic/`，各个版本通用。
 
@@ -61,6 +65,10 @@
 
 ## 构建
 
+### GitHub Actions CI 自动构建
+仓库配置了全版本自动构建工作流（`.github/workflows/build.yml`），每次推送或发版会自动打包涵盖 1.8.9 到 26.3 的所有 Forge / Fabric / NeoForge 模组 jar，并在工作流制品（Artifacts）中归档。
+
+### 本地构建
 需要 JDK 8（1.8.9）、JDK 21（1.20.1～1.21.11）和 JDK 25（26.x）。`build-all.bat` 默认用 `C:\Program Files\Java\jdk-21`
 和 `C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot`，装在别处的话先设置环境变量 `DANGO_JDK21` / `DANGO_JDK25`。
 
@@ -80,8 +88,8 @@ gradlew runClient              # 开发环境里直接运行
 
 ```
 version.properties   版本号（所有 Minecraft 版本共用）
-common/core          核心：模块、设置、网易云接口、播放器、一起听歌（不依赖 Minecraft）
-common/ui            界面：播放器窗口、歌词、Song card、灵动岛（只通过 Gfx / Platform 接口画）
+common/core          核心：模块解耦抽象层、平台服务（网易云/酷狗/概念版）、设置、播放器、一起听歌（不依赖 Minecraft）
+common/ui            界面：多平台切换侧栏、播放器窗口、歌词、Song card、灵动岛（只通过 Gfx / Platform 接口画）
 legacy/              Forge 1.8.9 平台层：实现 Gfx / Platform，OpenGL 2 着色器、字体
 modern/              1.20.1～1.21.11 的平台层（一个 Gradle 项目，每个版本 + 加载器一个子项目）
   src/main/            所有高版本共用：OpenGL 3.2 core 着色器、字体、按键、播放器界面
@@ -134,8 +142,8 @@ modern26/            26.x 的构建（Minecraft 不再混淆，换了一套构�
 
 ## 说明
 
-- 使用的是网易云音乐的非官方接口，仅供个人学习交流；歌曲版权归各平台和版权方所有
-- 海外账号需要会员才能播放大部分歌曲
+- 本模组使用各音乐平台的非官方公开接口，仅供个人学习交流；歌曲与歌词版权归各平台和版权方所有
+- 部分海外地区或 VIP 专享歌曲需要对应平台的会员权限
 
 ## 第三方
 
