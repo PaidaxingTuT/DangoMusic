@@ -12,6 +12,8 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
+enum class PlaylistKind { CLOUD, SPECIAL }
+
 class NeteasePlaylist(
     val id: Long,
     val name: String,
@@ -19,7 +21,11 @@ class NeteasePlaylist(
     val coverUrl: String,
     /** 自己创建的（含"我喜欢的音乐"）还是收藏别人的 */
     val owned: Boolean,
-)
+    val platform: String = "NetEase",
+    val kind: PlaylistKind = PlaylistKind.CLOUD,
+) {
+    val cacheKey: String get() = "$platform:$kind:$id"
+}
 
 /**
  * 网易云音乐接口（内置播放器用）。

@@ -126,7 +126,7 @@ class MusicScreen(
         ScreenState.backPage = from
         tracks.resetScroll()
         tracks.resetCoverflow()
-        Library.loadTracks(p.id)
+        Library.loadTracks(p)
     }
 
     internal fun doSearch() {

@@ -89,7 +89,9 @@ object CoverCache {
     }
 
     /** 取封面；还没有就去下载，先返回 null（画占位） */
-    fun get(key: String, url: String): Texture? {
+    fun get(key: String, url: String): Texture? = getImage("$key:$url", url)
+
+    private fun getImage(key: String, url: String): Texture? {
         textures[key]?.let {
             lastUsed[key] = now
             return it
@@ -107,7 +109,8 @@ object CoverCache {
             var ok = false
             var why = ""
             try {
-                val full = if ("?" in url) url else "$url?param=200y200"
+                val host = java.net.URL(url).host
+                val full = if (host.endsWith(".music.126.net") && "?" !in url) "$url?param=200y200" else url
                 val bytes = NeteaseApi.request(full, "image/jpeg,image/png,image/*;q=0.8")
                 if (bytes == null) {
                     why = "download failed"
@@ -134,19 +137,20 @@ object CoverCache {
         return null
     }
 
-    fun track(t: NeteaseTrack) = get("t:${t.id}", t.coverUrl)
+    fun track(t: NeteaseTrack) = get("t:${t.platform}:${t.hash.ifEmpty { t.id.toString() }}", t.coverUrl)
 
     private const val ROUND_SUFFIX = "#r"
 
     /** 圆角版封面（渲染线程调用）：原图下好后再生成一张四角透明的纹理。ratio = 圆角半径 / 边长 */
     fun rounded(key: String, url: String, ratio: Float = ROUND): Texture? {
-        val rk = key + ROUND_SUFFIX + (ratio * 100).toInt()
+        val sourceKey = "$key:$url"
+        val rk = sourceKey + ROUND_SUFFIX + (ratio * 100).toInt()
         textures[rk]?.let {
             lastUsed[rk] = now
             return it
         }
         get(key, url)                                  // 确保原图在下载 / 已缓存
-        val src = sources[key] ?: return null
+        val src = sources[sourceKey] ?: return null
         if (roundQueued.add(rk)) {
             worker.execute {
                 try {
@@ -158,7 +162,7 @@ object CoverCache {
         return null
     }
 
-    fun trackRounded(t: NeteaseTrack, ratio: Float = ROUND) = rounded("t:${t.id}", t.coverUrl, ratio)
+    fun trackRounded(t: NeteaseTrack, ratio: Float = ROUND) = rounded("t:${t.platform}:${t.hash.ifEmpty { t.id.toString() }}", t.coverUrl, ratio)
 
     /** 四个角挖成圆角（抗锯齿：边缘按覆盖率给透明度） */
     private fun roundCorners(src: BufferedImage, ratio: Float): BufferedImage {
@@ -182,7 +186,7 @@ object CoverCache {
         }
         return out
     }
-    fun playlist(p: NeteasePlaylist) = get("p:${p.id}", p.coverUrl)
+    fun playlist(p: NeteasePlaylist) = get("p:${p.cacheKey}", p.coverUrl)
 
     private fun square(src: BufferedImage, size: Int): BufferedImage {
         val side = min(src.width, src.height)

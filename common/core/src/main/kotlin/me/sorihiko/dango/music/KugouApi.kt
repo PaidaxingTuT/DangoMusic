@@ -120,26 +120,17 @@ object KugouApi {
      * 采用酷狗 cloudlist 服务的 AES-128-CBC + RSA 会话加密协议
      */
     fun getUserPlaylists(userId: Long, token: String, isLite: Boolean): List<NeteasePlaylist> {
-        val postData = """{"userid":$userId,"token":"$token","total_ver":979,"type":2,"page":1,"pagesize":50}"""
-        val jsonStr = callCloudListApi("/v7/get_all_list", postData, userId, token, isLite) ?: return emptyList()
-
-        val result = mutableListOf<NeteasePlaylist>()
-        try {
-            val root = JsonParser().parse(jsonStr).asJsonObject
-            val list = root.getAsJsonObject("data")?.getAsJsonArray("info") ?: return emptyList()
-            for (el in list) {
-                if (!el.isJsonObject) continue
-                val o = el.asJsonObject
-                val listId = o.get("listid")?.asLong ?: continue
-                val name = o.get("name")?.asString ?: "歌单"
-                val count = o.get("count")?.asInt ?: 0
-                val pic = o.get("pic")?.asString ?: ""
-                result += NeteasePlaylist(listId, name, count, pic, owned = true)
-            }
-        } catch (e: Exception) {
-            DangoLogger.warn("Kugou user playlists parse failed: {}", e.toString())
+        val items = pagedItems(50) { page ->
+            val postData = """{"userid":$userId,"token":"$token","total_ver":979,"type":2,"page":$page,"pagesize":50}"""
+            parsePage(callCloudListApi("/v7/get_all_list", postData, userId, token, isLite))
         }
-        return result
+        return items.mapNotNull { o ->
+            val listId = o.get("listid")?.asLong ?: return@mapNotNull null
+            NeteasePlaylist(
+                listId, o.text("name"), o.get("count")?.asInt ?: 0,
+                coverUrl(o.text("pic")), owned = true, platform = platformName(isLite),
+            )
+        }
     }
 
     /**
@@ -147,38 +138,74 @@ object KugouApi {
      * 采用酷狗 cloudlist 服务的 AES-128-CBC + RSA 会话加密协议
      */
     fun getPlaylistTracks(listId: Long, userId: Long, token: String, isLite: Boolean): List<NeteaseTrack> {
-        val postData = """{"listid":$listId,"userid":$userId,"token":"$token","type":0,"page":1,"pagesize":300,"area_code":1,"allplatform":1,"show_cover":1}"""
-        val jsonStr = callCloudListApi("/v4/get_list_all_file_v3", postData, userId, token, isLite) ?: return emptyList()
+        val items = pagedItems(300) { page ->
+            val postData = """{"listid":$listId,"userid":$userId,"token":"$token","type":0,"page":$page,"pagesize":300,"area_code":1,"allplatform":1,"show_cover":1}"""
+            parsePage(callCloudListApi("/v4/get_list_all_file_v3", postData, userId, token, isLite))
+        }
+        return items.mapNotNull { parsePlaylistTrack(it, isLite) }
+    }
 
-        val result = mutableListOf<NeteaseTrack>()
-        try {
-            val root = JsonParser().parse(jsonStr).asJsonObject
-            val arr = root.getAsJsonObject("data")?.getAsJsonArray("info") ?: return emptyList()
-            for (el in arr) {
-                if (!el.isJsonObject) continue
-                val o = el.asJsonObject
-                val hash = o.get("hash")?.asString ?: ""
-                if (hash.isEmpty()) continue
-                val name = o.get("name")?.asString ?: ""
-                val singer = o.get("singername")?.asString ?: ""
-                val artists = if (singer.isNotEmpty()) singer.split("、", "/", ",") else emptyList()
-                val duration = (o.get("timelen")?.asLong ?: 0L)
-                val coverTpl = o.get("cover")?.asString ?: ""
-                val cover = if (coverTpl.isNotEmpty()) coverTpl.replace("{size}", "400") else ""
-                val id = hash.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL
-                val plat = if (isLite) "KuGou Lite" else "KuGou"
-                result += NeteaseTrack(
-                    id = id,
-                    name = name,
-                    artists = artists,
-                    durationMs = duration,
-                    coverUrl = cover,
-                    platform = plat,
-                    hash = hash,
-                )
-            }
-        } catch (e: Exception) {
-            DangoLogger.warn("Kugou playlist tracks parse failed: {}", e.toString())
+    /** 公开推荐歌单使用 specialid，不能传给用户云歌单的 listid 接口。 */
+    fun getSpecialTracks(specialId: Long, isLite: Boolean): List<NeteaseTrack> {
+        val items = pagedItems(300) { page ->
+            val params = mapOf("specialid" to specialId.toString(), "page" to page.toString(), "pagesize" to "300", "format" to "json")
+            val query = signAndBuild(params, if (isLite) LITE_ANDROID_SALT else ANDROID_SALT)
+            parsePage(httpGet("https://gateway.kugou.com/api/v3/special/song$query", mapOf("x-router" to "mobilecdn.kugou.com")))
+        }
+        return items.mapNotNull { parsePlaylistTrack(it, isLite) }
+    }
+
+    private fun platformName(isLite: Boolean) = if (isLite) "KuGou Lite" else "KuGou"
+
+    private fun JsonObject.text(key: String): String = get(key)?.takeIf { it.isJsonPrimitive }?.asString ?: ""
+    private fun coverUrl(template: String) = template.replace("{size}", "400").replace("http://", "https://")
+
+    internal fun parsePlaylistTrack(o: JsonObject, isLite: Boolean): NeteaseTrack? {
+        val hash = o.text("hash")
+        if (hash.isEmpty()) return null
+        val filename = o.text("name").ifEmpty { o.text("filename") }
+        val split = filename.indexOf(" - ")
+        val singer = o.text("singername").ifEmpty { if (split >= 0) filename.substring(0, split) else "" }
+        val name = o.text("songname").ifEmpty { if (split >= 0) filename.substring(split + 3) else filename }
+        val trans = o.get("trans_param")?.takeIf { it.isJsonObject }?.asJsonObject
+        val cover = o.text("cover").ifEmpty { trans?.text("union_cover") ?: "" }
+            .ifEmpty { o.text("imgurl") }.ifEmpty { o.text("sizable_cover") }
+        return NeteaseTrack(
+            id = hash.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL,
+            name = name,
+            artists = if (singer.isEmpty()) emptyList() else singer.split("、", "/", ","),
+            durationMs = o.get("timelen")?.takeUnless { it.isJsonNull }?.asLong
+                ?: ((o.get("duration")?.takeUnless { it.isJsonNull }?.asLong ?: 0L) * 1000L),
+            coverUrl = coverUrl(cover), platform = platformName(isLite), hash = hash,
+            albumAudioId = o.get("album_audio_id")?.takeUnless { it.isJsonNull }?.asLong ?: 0L,
+        )
+    }
+
+    private fun parsePage(json: String?): JsonObject {
+        check(json != null) { "Kugou playlist request failed" }
+        val root = JsonParser().parse(json).asJsonObject
+        check(root.get("status")?.asInt != 0) { "Kugou playlist API returned an error" }
+        return root.getAsJsonObject("data") ?: error("Kugou playlist data missing")
+    }
+
+    /** 按原始条目数判断分页，避免没有 hash 的条目让后续歌曲被截断。 */
+    internal fun pagedItems(pageSize: Int, fetch: (Int) -> JsonObject): List<JsonObject> {
+        val result = mutableListOf<JsonObject>()
+        val seen = HashSet<String>()
+        var page = 1
+        var received = 0
+        while (true) {
+            val data = fetch(page)
+            val items = data.getAsJsonArray("info") ?: error("Kugou playlist items missing")
+            if (items.size() == 0) break
+            check(seen.add(items.toString())) { "Kugou playlist API repeated a page" }
+            result += items.filter { it.isJsonObject }.map { it.asJsonObject }
+            received += items.size()
+            val total = (data.get("total") ?: data.get("count"))?.takeIf { it.isJsonPrimitive }?.asInt
+            if (total != null && total > 0) {
+                if (received >= total) break
+            } else if (items.size() < pageSize) break
+            page++
         }
         return result
     }
@@ -301,7 +328,7 @@ object KugouApi {
                 val albumAudioId = o.get("AlbumAudioID")?.asLong ?: 0L
 
                 val imageTpl = o.get("Image")?.asString ?: ""
-                val cover = if (imageTpl.isNotEmpty()) imageTpl.replace("{size}", "400") else ""
+                val cover = coverUrl(imageTpl)
 
                 val id = hash.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL
                 val plat = if (isLite) "KuGou Lite" else "KuGou"
@@ -365,8 +392,8 @@ object KugouApi {
                 val name = o.get("specialname")?.asString ?: "酷狗歌单"
                 val count = o.get("songcount")?.asInt ?: 0
                 val coverTpl = o.get("imgurl")?.asString ?: ""
-                val cover = if (coverTpl.isNotEmpty()) coverTpl.replace("{size}", "400") else ""
-                result += NeteasePlaylist(id, name, count, cover, owned = false)
+                val cover = coverUrl(coverTpl)
+                result += NeteasePlaylist(id, name, count, cover, owned = false, platform = platformName(isLite), kind = PlaylistKind.SPECIAL)
             }
         } catch (e: Exception) {
             DangoLogger.warn("Kugou recommend playlists parse failed: {}", e.toString())
@@ -626,6 +653,7 @@ object KugouApi {
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
             conn.setRequestProperty("User-Agent", "Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi")
+            conn.setRequestProperty("mid", "1")
             for ((k, v) in headers) conn.setRequestProperty(k, v)
             if (conn.responseCode !in 200..299) return null
             return conn.inputStream.use { String(it.readBytes(), StandardCharsets.UTF_8) }

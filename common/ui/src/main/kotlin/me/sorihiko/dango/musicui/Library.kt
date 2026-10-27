@@ -1,6 +1,7 @@
 package me.sorihiko.dango.musicui
 
 import me.sorihiko.dango.gfx.GuiCanvas
+import me.sorihiko.dango.music.MusicPlatformService
 import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.music.NeteasePlaylist
 import me.sorihiko.dango.music.NeteaseTrack
@@ -26,143 +27,143 @@ internal object ScreenState {
     var context: GuiCanvas? = null
 }
 
-/**
- * 音乐平台数据（我的歌单、歌单里的歌、推荐、排行榜、搜索结果）。
- * 都在后台线程读，读完直接替换，界面每帧读最新的。
- */
+/** 音乐平台数据。每次切换平台或账号都替换整份数据，旧请求只能写回旧数据。 */
 internal object Library {
     private val worker = Executors.newFixedThreadPool(2) { r -> Thread(r, "Dango-MusicUI").apply { isDaemon = true } }
 
-    @Volatile var playlists: List<NeteasePlaylist> = emptyList()
-        private set
-    @Volatile var playlistsLoading = false
-        private set
-    /** 底部提示（读取失败等），空就不显示 */
-    @Volatile var status = ""
-        private set
-    private val tracksCache = ConcurrentHashMap<Long, List<NeteaseTrack>>()
-    private val tracksLoading = ConcurrentHashMap.newKeySet<Long>()
+    private class Data(val service: MusicPlatformService) {
+        @Volatile var playlists: List<NeteasePlaylist> = emptyList()
+        @Volatile var playlistsLoading = false
+        @Volatile var status = ""
+        val tracksCache = ConcurrentHashMap<String, List<NeteaseTrack>>()
+        val tracksLoading = ConcurrentHashMap.newKeySet<String>()
+        val loadedPlaylists = ConcurrentHashMap<String, NeteasePlaylist>()
+        @Volatile var recommend: List<NeteasePlaylist>? = null
+        @Volatile var recommendLoading = false
+        @Volatile var charts: List<NeteasePlaylist>? = null
+        @Volatile var chartsLoading = false
+        @Volatile var searchResults: List<NeteaseTrack>? = null
+        @Volatile var searching = false
+        @Volatile var searchVersion = 0
+        @Volatile var lastLoadAt = 0L
+    }
 
-    @Volatile var recommend: List<NeteasePlaylist>? = null
-        private set
-    @Volatile var recommendLoading = false
-        private set
-    @Volatile var charts: List<NeteasePlaylist>? = null
-        private set
-    @Volatile var chartsLoading = false
-        private set
+    @Volatile private var data = Data(MusicServices.current)
+    val playlists get() = data.playlists
+    val playlistsLoading get() = data.playlistsLoading
+    val status get() = data.status
+    val recommend get() = data.recommend
+    val recommendLoading get() = data.recommendLoading
+    val charts get() = data.charts
+    val chartsLoading get() = data.chartsLoading
+    val searchResults get() = data.searchResults
+    val searching get() = data.searching
 
-    @Volatile var searchResults: List<NeteaseTrack>? = null
-        private set
-    @Volatile var searching = false
-        private set
-
-    /** 上次读歌单的时间：打开播放器时超过 [STALE_MS] 就在后台自动刷新 */
-    private var lastLoadAt = 0L
     private const val STALE_MS = 5 * 60_000L
+    val stale: Boolean get() = System.currentTimeMillis() - data.lastLoadAt > STALE_MS
 
-    val stale: Boolean get() = System.currentTimeMillis() - lastLoadAt > STALE_MS
-
-    fun tracks(playlistId: Long): List<NeteaseTrack>? = tracksCache[playlistId]
+    fun tracks(playlist: NeteasePlaylist): List<NeteaseTrack>? = data.tracksCache[playlist.cacheKey]
 
     fun reloadPlaylists() {
-        if (playlistsLoading) return
-        playlistsLoading = true
-        lastLoadAt = System.currentTimeMillis()
-        status = "正在读取歌单…"
+        val d = data
+        if (d.playlistsLoading) return
+        d.playlistsLoading = true
+        d.lastLoadAt = System.currentTimeMillis()
+        d.status = "正在读取歌单…"
         worker.execute {
             try {
-                val svc = MusicServices.current
-                val list = svc.userPlaylists()
-                playlists = list
-                status = if (list.isEmpty()) "没有读到歌单（检查网络或登录）" else ""
-            } catch (e: Exception) {
-                status = "读取歌单失败"
+                d.service.resolveUser()
+                val list = d.service.userPlaylists()
+                d.playlists = list
+                d.status = if (list.isEmpty()) "没有读到歌单（检查网络或登录）" else ""
+            } catch (_: Exception) {
+                d.status = "读取歌单失败"
             } finally {
-                playlistsLoading = false
+                d.playlistsLoading = false
             }
         }
     }
 
     fun loadRecommend() {
-        if (recommend != null || recommendLoading) return
-        recommendLoading = true
+        val d = data
+        if (d.recommend != null || d.recommendLoading) return
+        d.recommendLoading = true
         worker.execute {
-            recommend = try {
-                MusicServices.current.recommendPlaylists()
-            } catch (_: Exception) { emptyList() }
-            recommendLoading = false
+            d.recommend = try { d.service.recommendPlaylists() } catch (_: Exception) { emptyList() }
+            d.recommendLoading = false
         }
     }
 
     fun loadCharts() {
-        if (charts != null || chartsLoading) return
-        chartsLoading = true
+        val d = data
+        if (d.charts != null || d.chartsLoading) return
+        d.chartsLoading = true
         worker.execute {
-            charts = try {
-                MusicServices.current.toplists()
-            } catch (_: Exception) { emptyList() }
-            chartsLoading = false
+            d.charts = try { d.service.toplists() } catch (_: Exception) { emptyList() }
+            d.chartsLoading = false
         }
     }
 
-    /** 读一个歌单里的歌（已经读过或正在读就跳过） */
-    fun loadTracks(playlistId: Long) {
-        if (tracksCache.containsKey(playlistId) || !tracksLoading.add(playlistId)) return
+    /** 读一个歌单里的歌（已经读过或正在读就跳过）。来源类型也是缓存键的一部分。 */
+    fun loadTracks(playlist: NeteasePlaylist) {
+        val d = data
+        val key = playlist.cacheKey
+        if (d.tracksCache.containsKey(key) || !d.tracksLoading.add(key)) return
+        d.loadedPlaylists[key] = playlist
         worker.execute {
             try {
-                tracksCache[playlistId] = MusicServices.current.playlistTracks(playlistId)
+                d.tracksCache[key] = d.service.playlistTracks(playlist)
             } catch (_: Exception) {
-                tracksCache[playlistId] = emptyList()
+                d.status = "读取歌单失败"
             } finally {
-                tracksLoading.remove(playlistId)
+                d.tracksLoading.remove(key)
             }
         }
     }
 
     fun search(q: String) {
-        searching = true
-        searchResults = null
+        val d = data
+        val version = ++d.searchVersion
+        d.searching = true
+        d.searchResults = null
         worker.execute {
-            try {
-                searchResults = MusicServices.current.search(q)
-            } catch (_: Exception) {
-                searchResults = emptyList()
-            } finally {
-                searching = false
+            val results = try { d.service.search(q) } catch (_: Exception) { emptyList() }
+            synchronized(d) {
+                if (version == d.searchVersion) {
+                    d.searchResults = results
+                    d.searching = false
+                }
             }
         }
     }
 
-    /**
-     * 悄悄刷新：后台重新读歌单列表和已经打开过的歌单里的歌，读到了再替换，
-     * 界面上不会出现"加载中"（游戏开着时在手机上新建歌单 / 加歌，下次打开播放器就能看到）
-     */
+    /** 后台刷新我的歌单和已打开的歌单，界面继续显示已有数据。 */
     fun softRefresh() {
-        lastLoadAt = System.currentTimeMillis()
+        val d = data
+        d.lastLoadAt = System.currentTimeMillis()
         worker.execute {
-            val svc = MusicServices.current
             try {
-                val list = svc.userPlaylists()
-                if (list.isNotEmpty()) playlists = list
+                d.playlists = d.service.userPlaylists()
             } catch (_: Exception) {
             }
-            for (id in tracksCache.keys.toList()) {
+            for ((key, playlist) in d.loadedPlaylists) {
+                if (d !== data) return@execute
                 try {
-                    val tracks = svc.playlistTracks(id)
-                    if (tracks.isNotEmpty()) tracksCache[id] = tracks
+                    d.tracksCache[key] = d.service.playlistTracks(playlist)
                 } catch (_: Exception) {
                 }
             }
         }
     }
 
-    /** 登录 / 退出 / 切换平台后全部重新读 */
+    /** 登录 / 退出 / 切换平台后全部重新读。旧任务不会改动新数据或加载标记。 */
     fun refreshAll() {
-        playlists = emptyList()
-        tracksCache.clear()
-        recommend = null
-        charts = null
+        data = Data(MusicServices.current)
+        ScreenState.opened = null
+        ScreenState.backPage = null
+        ScreenState.lastQuery = ""
+        ScreenState.settingsBack = Page.HOME
+        if (ScreenState.page == Page.PLAYLIST || ScreenState.page == Page.SEARCH) ScreenState.page = Page.HOME
         reloadPlaylists()
         loadRecommend()
         if (ScreenState.page == Page.CHARTS) loadCharts()

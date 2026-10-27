@@ -23,7 +23,7 @@ object NeteasePlatformService : MusicPlatformService {
     override fun userPlaylists(): List<NeteasePlaylist> = NeteaseApi.userPlaylists()
     override fun recommendPlaylists(): List<NeteasePlaylist> = NeteaseApi.recommendPlaylists()
     override fun toplists(): List<NeteasePlaylist> = NeteaseApi.toplists()
-    override fun playlistTracks(playlistId: Long): List<NeteaseTrack> = NeteaseApi.playlistTracks(playlistId)
+    override fun playlistTracks(playlist: NeteasePlaylist): List<NeteaseTrack> = NeteaseApi.playlistTracks(playlist.id)
     override fun search(keyword: String, limit: Int): List<NeteaseTrack> = NeteaseApi.search(keyword, limit)
 
     override fun songUrl(track: NeteaseTrack): String? = NeteaseApi.songUrl(track.id)?.url

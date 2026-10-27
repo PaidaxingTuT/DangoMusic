@@ -51,8 +51,9 @@ abstract class BaseKugouPlatformService(
     override fun recommendPlaylists(): List<NeteasePlaylist> = KugouApi.recommendPlaylists(isLite)
     override fun toplists(): List<NeteasePlaylist> = KugouApi.recommendPlaylists(isLite)
 
-    override fun playlistTracks(playlistId: Long): List<NeteaseTrack> {
-        return KugouApi.getPlaylistTracks(playlistId, userId, login.token, isLite)
+    override fun playlistTracks(playlist: NeteasePlaylist): List<NeteaseTrack> {
+        return if (playlist.kind == PlaylistKind.SPECIAL) KugouApi.getSpecialTracks(playlist.id, isLite)
+        else KugouApi.getPlaylistTracks(playlist.id, userId, login.token, isLite)
     }
 
     override fun search(keyword: String, limit: Int): List<NeteaseTrack> {

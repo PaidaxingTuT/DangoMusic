@@ -47,6 +47,7 @@ internal class LoginDialog(private val screen: MusicScreen) {
                     KugouLogin -> MusicServices.select(MusicServices.KUGOU)
                     KugouLiteLogin -> MusicServices.select(MusicServices.KUGOU_LITE)
                 }
+                Library.refreshAll()
                 if (showing) {
                     currentLogin.start()
                 }

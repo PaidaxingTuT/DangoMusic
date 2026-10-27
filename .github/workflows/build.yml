@@ -8,7 +8,7 @@ on:
       title:
         description: 'Build Description'
         required: false
-        default: 'Add KuGou & KuGou Lite Support'
+        default: 'Build v1.6.0'
         type: string
 
 jobs:
@@ -31,6 +31,10 @@ jobs:
           chmod +x common/core/gradlew 2>/dev/null || true
           chmod +x common/ui/gradlew 2>/dev/null || true
 
+      - name: Test Common
+        working-directory: modern
+        run: ./gradlew -p ../common :core:test :ui:test --no-daemon
+
       - name: Build Modern
         working-directory: modern
         run: ./gradlew build --no-daemon
@@ -40,7 +44,7 @@ jobs:
           mkdir -p output
           for d in modern/versions/*; do
             if [ -d "$d/build/libs" ]; then
-              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} output/ \;
+              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" ! -name "*-dev-shadow.jar" -exec cp {} output/ \;
             fi
           done
 
@@ -78,7 +82,7 @@ jobs:
           mkdir -p output
           for d in modern26/versions/*; do
             if [ -d "$d/build/libs" ]; then
-              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} output/ \;
+              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" ! -name "*-dev-shadow.jar" -exec cp {} output/ \;
             fi
           done
 
@@ -118,6 +122,8 @@ jobs:
           path: output_189/*.jar
 
   publish-all:
+    permissions:
+      contents: write
     name: Package All Jars
     needs: [build-legacy, build-modern, build-modern26]
     runs-on: ubuntu-latest

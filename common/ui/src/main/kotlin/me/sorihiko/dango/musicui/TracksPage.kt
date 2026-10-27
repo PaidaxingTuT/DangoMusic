@@ -98,7 +98,7 @@ internal class TracksPage(private val screen: MusicScreen) {
         Page.QUEUE -> I18n.text("Now Playing") to MusicPlayer.queue
         Page.PLAYLIST -> {
             val p = ScreenState.opened
-            (p?.name ?: "") to (if (p != null) Library.tracks(p.id) else null)
+            (p?.name ?: "") to (if (p != null) Library.tracks(p) else null)
         }
         else -> "" to null
     }

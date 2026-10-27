@@ -43,7 +43,7 @@ interface MusicPlatformService {
     fun toplists(): List<NeteasePlaylist>
 
     /** 获取指定歌单内的歌曲列表 */
-    fun playlistTracks(playlistId: Long): List<NeteaseTrack>
+    fun playlistTracks(playlist: NeteasePlaylist): List<NeteaseTrack>
 
     /** 搜索歌曲 */
     fun search(keyword: String, limit: Int = 30): List<NeteaseTrack>

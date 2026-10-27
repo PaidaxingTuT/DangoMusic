@@ -5,7 +5,6 @@ import me.sorihiko.dango.i18n.I18n
 import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicScreen
-import me.sorihiko.dango.music.NeteaseApi
 import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.party.ListenParty
 import me.sorihiko.dango.platform.Keys
@@ -141,7 +140,7 @@ internal class Sidebar(private val screen: MusicScreen) {
         }
         ui.endClip()
         if (list.isEmpty()) {
-            val msg = if (Library.playlistsLoading) I18n.text("Loading...") else if (NeteaseApi.loggedIn) I18n.text("No playlists") else I18n.text("Log in to see your playlists")
+            val msg = if (Library.playlistsLoading) I18n.text("Loading...") else if (MusicServices.current.loggedIn) I18n.text("No playlists") else I18n.text("Log in to see your playlists")
             ui.text(msg, x + 2f, listArea.y + 6f, 11f, Theme.TEXT_TERTIARY)
         }
 
@@ -172,7 +171,7 @@ internal class Sidebar(private val screen: MusicScreen) {
         val svc = MusicServices.current
         if (svc.loggedIn) {
             val aurl = svc.avatarUrl
-            ui.drawCover(av, if (aurl.isNotEmpty()) CoverCache.get("u:${svc.userId}", aurl) else null, 14f)
+            ui.drawCover(av, if (aurl.isNotEmpty()) CoverCache.get("u:${svc.id}:${svc.userId}", aurl) else null, 14f)
             val who = svc.nickname.ifEmpty { I18n.text("Logged in") }
             val vipTag = if (svc.isVip) " [VIP]" else ""
             val outW = ui.width(I18n.text("Log out"), 10f, Theme.FONT_MEDIUM)
