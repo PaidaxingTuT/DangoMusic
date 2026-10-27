@@ -1,0 +1,153 @@
+name: Build DangoMusic Mod
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-legacy:
+    name: Build 1.8.9 (Forge)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '8'
+
+      - name: Make gradlew executable
+        run: |
+          chmod +x legacy/gradlew
+          chmod +x common/core/gradlew 2>/dev/null || true
+          chmod +x common/ui/gradlew 2>/dev/null || true
+
+      - name: Build 1.8.9
+        working-directory: legacy
+        run: ./gradlew build --no-daemon
+
+      - name: Collect 1.8.9 Jar
+        run: |
+          mkdir -p output
+          find legacy/build/libs -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} output/ \;
+
+      - name: Upload 1.8.9 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-1.8.9
+          path: output/*.jar
+
+  build-modern:
+    name: Build 1.20.1 ~ 1.21.x (Fabric / Forge / NeoForge)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Make gradlew executable
+        run: |
+          chmod +x modern/gradlew
+          chmod +x common/core/gradlew 2>/dev/null || true
+          chmod +x common/ui/gradlew 2>/dev/null || true
+
+      - name: Build Modern
+        working-directory: modern
+        run: ./gradlew build --no-daemon
+
+      - name: Collect Modern Jars
+        run: |
+          mkdir -p output
+          for d in modern/versions/*; do
+            if [ -d "$d/build/libs" ]; then
+              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} output/ \;
+            fi
+          done
+
+      - name: Upload Modern Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-Modern
+          path: output/*.jar
+
+  build-modern26:
+    name: Build 26.x (Fabric / NeoForge)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Make gradlew executable
+        run: |
+          chmod +x modern26/gradlew
+          chmod +x common/core/gradlew 2>/dev/null || true
+          chmod +x common/ui/gradlew 2>/dev/null || true
+
+      - name: Build 26.x
+        working-directory: modern26
+        run: ./gradlew build --no-daemon
+
+      - name: Collect 26.x Jars
+        run: |
+          mkdir -p output
+          for d in modern26/versions/*; do
+            if [ -d "$d/build/libs" ]; then
+              find "$d/build/libs" -maxdepth 1 -name "DangoMusic-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} output/ \;
+            fi
+          done
+
+      - name: Upload 26.x Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-26.x
+          path: output/*.jar
+
+  publish-all:
+    name: Package All Jars
+    needs: [build-legacy, build-modern, build-modern26]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download 1.8.9 Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: DangoMusic-1.8.9
+          path: dist
+
+      - name: Download Modern Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: DangoMusic-Modern
+          path: dist
+
+      - name: Download 26.x Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: DangoMusic-26.x
+          path: dist
+
+      - name: List All Built Jars
+        run: |
+          echo "=== All Built Jars ==="
+          ls -lh dist/
+
+      - name: Upload All-in-One Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-All-Versions
+          path: dist/*.jar
