@@ -1,7 +1,6 @@
 package me.sorihiko.dango.musicui
 
 import me.sorihiko.dango.gfx.GuiCanvas
-import me.sorihiko.dango.music.NeteaseApi
 import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.music.NeteasePlaylist
 import me.sorihiko.dango.music.NeteaseTrack
@@ -28,7 +27,7 @@ internal object ScreenState {
 }
 
 /**
- * 从网易云读来的数据：我的歌单、歌单里的歌、推荐、排行榜、搜索结果。
+ * 音乐平台数据（我的歌单、歌单里的歌、推荐、排行榜、搜索结果）。
  * 都在后台线程读，读完直接替换，界面每帧读最新的。
  */
 internal object Library {
@@ -58,7 +57,7 @@ internal object Library {
     @Volatile var searching = false
         private set
 
-    /** 上次从网易云读歌单的时间：打开播放器时超过 [STALE_MS] 就在后台自动刷新 */
+    /** 上次读歌单的时间：打开播放器时超过 [STALE_MS] 就在后台自动刷新 */
     private var lastLoadAt = 0L
     private const val STALE_MS = 5 * 60_000L
 
@@ -73,8 +72,8 @@ internal object Library {
         status = "正在读取歌单…"
         worker.execute {
             try {
-                NeteaseApi.ensureCookieFile()
-                val list = NeteaseApi.userPlaylists()
+                val svc = MusicServices.current
+                val list = svc.userPlaylists()
                 playlists = list
                 status = if (list.isEmpty()) "没有读到歌单（检查网络或登录）" else ""
             } catch (e: Exception) {
@@ -89,11 +88,8 @@ internal object Library {
         if (recommend != null || recommendLoading) return
         recommendLoading = true
         worker.execute {
-            val cur = LoginDialog.currentLogin
             recommend = try {
-                if (cur == me.sorihiko.dango.music.KugouLogin) me.sorihiko.dango.music.KugouApi.recommendPlaylists(isLite = false)
-                else if (cur == me.sorihiko.dango.music.KugouLiteLogin) me.sorihiko.dango.music.KugouApi.recommendPlaylists(isLite = true)
-                else NeteaseApi.recommendPlaylists()
+                MusicServices.current.recommendPlaylists()
             } catch (_: Exception) { emptyList() }
             recommendLoading = false
         }
@@ -103,7 +99,9 @@ internal object Library {
         if (charts != null || chartsLoading) return
         chartsLoading = true
         worker.execute {
-            charts = try { NeteaseApi.toplists() } catch (_: Exception) { emptyList() }
+            charts = try {
+                MusicServices.current.toplists()
+            } catch (_: Exception) { emptyList() }
             chartsLoading = false
         }
     }
@@ -113,7 +111,7 @@ internal object Library {
         if (tracksCache.containsKey(playlistId) || !tracksLoading.add(playlistId)) return
         worker.execute {
             try {
-                tracksCache[playlistId] = NeteaseApi.playlistTracks(playlistId)
+                tracksCache[playlistId] = MusicServices.current.playlistTracks(playlistId)
             } catch (_: Exception) {
                 tracksCache[playlistId] = emptyList()
             } finally {
@@ -127,14 +125,7 @@ internal object Library {
         searchResults = null
         worker.execute {
             try {
-                val cur = LoginDialog.currentLogin
-                searchResults = if (cur == me.sorihiko.dango.music.KugouLogin) {
-                    me.sorihiko.dango.music.KugouApi.search(q, isLite = false)
-                } else if (cur == me.sorihiko.dango.music.KugouLiteLogin) {
-                    me.sorihiko.dango.music.KugouApi.search(q, isLite = true)
-                } else {
-                    NeteaseApi.search(q)
-                }
+                searchResults = MusicServices.current.search(q)
             } catch (_: Exception) {
                 searchResults = emptyList()
             } finally {
@@ -150,14 +141,15 @@ internal object Library {
     fun softRefresh() {
         lastLoadAt = System.currentTimeMillis()
         worker.execute {
+            val svc = MusicServices.current
             try {
-                val list = NeteaseApi.userPlaylists()
+                val list = svc.userPlaylists()
                 if (list.isNotEmpty()) playlists = list
             } catch (_: Exception) {
             }
             for (id in tracksCache.keys.toList()) {
                 try {
-                    val tracks = NeteaseApi.playlistTracks(id)
+                    val tracks = svc.playlistTracks(id)
                     if (tracks.isNotEmpty()) tracksCache[id] = tracks
                 } catch (_: Exception) {
                 }
@@ -165,7 +157,7 @@ internal object Library {
         }
     }
 
-    /** 登录 / 退出后全部重新读 */
+    /** 登录 / 退出 / 切换平台后全部重新读 */
     fun refreshAll() {
         playlists = emptyList()
         tracksCache.clear()
