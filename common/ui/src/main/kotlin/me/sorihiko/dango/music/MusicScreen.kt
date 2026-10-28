@@ -68,6 +68,8 @@ class MusicScreen(
         openKeyHeld = platform.isKeyDown(module.openKey.value)
         if (ScreenState.context == null) ScreenState.context = DangoClient.gfx.newCanvas()
         openedAt = System.currentTimeMillis()
+        Library.ensureSource()
+        NativeAccounts.refreshProfile(MusicSources.selected)
         if (Library.playlists.isEmpty()) Library.reloadPlaylists()
         else if (Library.stale) Library.softRefresh()
         Library.loadRecommend()
@@ -90,6 +92,18 @@ class MusicScreen(
     }
 
     // ---------------------------------------------------------------- 导航
+
+    internal fun selectSource(source: MusicSource) {
+        if (source == MusicSources.selected) return
+        module.selectSource(source)
+        NativeAccounts.refreshProfile(source)
+        sidebar.searchText = ""
+        sidebar.searchFocused = false
+        ScreenState.lastQuery = ""
+        ScreenState.opened = null
+        Library.ensureSource()
+        go(Page.HOME)
+    }
 
     internal fun go(p: Page) {
         tracks.clearFilter()
@@ -165,12 +179,14 @@ class MusicScreen(
         sidebar.searchFocused = false
         tracks.filterFocused = false
         party.codeFocused = false
+        party.commitProxy()
     }
 
     // ---------------------------------------------------------------- 绘制
 
     /** 每帧调用 */
-    fun render() {
+    @JvmOverloads
+    fun render(menuBackdropReady: Boolean = false) {
         if (closed) return
         val alpha = opacity(System.currentTimeMillis())
         if (closingAt != 0L && alpha <= 0f) {
@@ -186,6 +202,19 @@ class MusicScreen(
         ui.mx = (platform.mouseX / scale).toInt()
         ui.my = (platform.mouseY / scale).toInt()
         val ctx = ui.ctx
+        // 没有世界时原版不会在播放器下面重画背景。先覆盖上一帧，
+        // 否则玻璃会反复采样自身，饱和度不断累积，最终变成亮粉色。
+        if (platform.player == null && !menuBackdropReady) {
+            ctx.begin(false, ui.mx, ui.my)
+            try {
+                ctx.drawShape(
+                    LayoutBounds(0f, 0f, platform.windowWidth.toFloat(), platform.windowHeight.toFloat()),
+                    ShapeStyle(Color(0.075f, 0.085f, 0.11f, 1f)),
+                )
+            } finally {
+                ctx.end()
+            }
+        }
         ctx.begin(true, ui.mx, ui.my)
         try {
             val now = System.nanoTime()
@@ -248,7 +277,7 @@ class MusicScreen(
     private fun drawContent(area: LayoutBounds) {
         // 底部小字只在有提示（读取失败等）时显示
         val foot = I18n.message(Library.status)
-        if (foot.isNotEmpty()) ui.text(foot, area.x, area.bottom - 11f, 10f, RED, Theme.FONT_SEMIBOLD)
+        if (foot.isNotEmpty()) ui.text(ui.trim(foot, area.width, 10f, Theme.FONT_SEMIBOLD), area.x, area.bottom - 11f, 10f, RED, Theme.FONT_SEMIBOLD)
         val body = LayoutBounds(area.x, area.y, area.width, area.height - (if (foot.isNotEmpty()) 18f else 4f))
         // 滚轮区域：哪一页画了，哪一页才有
         grid.area = LayoutBounds()
@@ -256,7 +285,8 @@ class MusicScreen(
         settings.area = LayoutBounds()
 
         val s = ScreenState
-        val key = "${s.page}|${s.opened?.id}|${s.settingsTab}|${s.coverView}|${s.lastQuery}"
+        // 设置页的标签切换有自己的过渡动画，不算换页（否则整页会从透明重新淡入，看起来闪一下）
+        val key = "${s.page}|${s.opened?.id}|${s.coverView}|${s.lastQuery}"
         if (key != pageKey) {
             pageKey = key
             ui.pageAt = System.currentTimeMillis()
@@ -313,8 +343,10 @@ class MusicScreen(
         val hit = ui.hits.firstOrNull { it.first.contains(mx, my) }
         settings.onClickElsewhere(hit)
         if (hit == null || hit.first !== sidebar.searchRect) sidebar.searchFocused = false
+        if (hit == null || !sidebar.isMenuHit(hit.first)) sidebar.menuOpen = false
         if (hit == null || hit.first !== tracks.filterRect) tracks.filterFocused = false
         if (hit == null || hit.first !== party.codeRect) party.codeFocused = false
+        if (hit == null || hit.first !== party.proxyRect) party.commitProxy()
         hit?.second?.invoke()
     }
 

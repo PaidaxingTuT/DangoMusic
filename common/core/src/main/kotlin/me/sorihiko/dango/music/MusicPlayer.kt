@@ -40,7 +40,7 @@ object MusicPlayer {
     /** 歌曲自然播完时重播当前曲目；手动切歌仍按队列 / Shuffle 工作。 */
     @Volatile var repeatOne = false
     /** 0..1 */
-    @Volatile var volume = 0.5f
+    @Volatile var volume = 0.2f
 
     private val loader = Executors.newSingleThreadExecutor { r -> Thread(r, "Dango-MusicLoader").apply { isDaemon = true } }
     private val random = Random()
@@ -90,6 +90,7 @@ object MusicPlayer {
     // ---------------------------------------------------------------- 队列控制
 
     fun playQueue(tracks: List<NeteaseTrack>, startIndex: Int) {
+        if (tracks.isNotEmpty() && !canPlay(tracks[Math.floorMod(startIndex, tracks.size)])) return
         queue = tracks
         playIndex(startIndex)
     }
@@ -98,8 +99,9 @@ object MusicPlayer {
         val q = queue
         if (q.isEmpty()) return
         val idx = ((i % q.size) + q.size) % q.size
-        index = idx
         val track = q[idx]
+        if (!canPlay(track)) return
+        index = idx
         val gen = ++generation
         stopLine()
         audio = null
@@ -112,11 +114,18 @@ object MusicPlayer {
     /** 一起听：正在跟随房主（歌放完不自动下一首，等房主切） */
     @Volatile var followMode = false
 
+    private fun canPlay(track: NeteaseTrack): Boolean {
+        if (me.sorihiko.dango.party.ListenParty.role == me.sorihiko.dango.party.ListenParty.Role.NONE || me.sorihiko.dango.party.ListenParty.supportsSource(track.source)) return true
+        message = "This source is unavailable in this room. Create a new room with the updated mod."
+        return false
+    }
+
     /**
      * 一起听：跟随房主播放某首歌。
      * 起始位置在下载完成、真正开始播放前才计算（下载要好几秒，提前算会落后）。
      */
     fun playTrackAt(track: NeteaseTrack, startAt: () -> Long, paused: Boolean) {
+        if (!canPlay(track)) return
         queue = listOf(track)
         index = 0
         val gen = ++generation
@@ -203,13 +212,17 @@ object MusicPlayer {
 
     private fun load(gen: Int, track: NeteaseTrack, startAt: (() -> Long)? = null, paused: Boolean = false) {
         try {
-            val url = NeteaseApi.songUrl(track.id)
+            val url = MusicSources.api(track.source).songUrl(track)
             if (gen != generation) return
-            if (url == null) return fail(gen, "拿不到播放地址")
-            val bytes = NeteaseApi.request(url.url)
+            if (url == null) return fail(gen, if (track.source == MusicSource.NETEASE) "拿不到播放地址"
+                else if (NativeAccounts.get(track.source) != null) "No playable MP3. Your login may have expired, or this song is restricted by membership or region."
+                else "No guest MP3 available. Login, payment or regional restrictions may apply.")
+            val bytes = if (track.source == MusicSource.NETEASE) NeteaseApi.request(url.url)
+                else SourceHttp.bytes(url.url, if (track.source == MusicSource.QQ) "https://y.qq.com/" else "https://m.kugou.com/")
             if (gen != generation) return
             if (bytes == null || bytes.size < 10_000) {
-                return fail(gen, if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
+                return fail(gen, if (track.source != MusicSource.NETEASE) "Unable to download this guest MP3. Try another song."
+                    else if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
             }
             audio = bytes
             message = if (url.trialOnly) "仅试听片段" else ""
@@ -221,8 +234,13 @@ object MusicPlayer {
             startDecode(gen, bytes, start)
         } catch (e: Throwable) {
             // 包括 NoClassDefFoundError 之类的 Error：不接住的话线程会悄悄退出，界面一直停在"加载中"
-            DangoLogger.warn("Music load failed: {}", e.toString())
-            fail(gen, "加载失败：" + describe(e))
+            if (track.source == MusicSource.NETEASE) {
+                DangoLogger.warn("Music load failed: {}", e.toString())
+                fail(gen, "加载失败：" + describe(e))
+            } else {
+                DangoLogger.warn("Source {} load failed: {}", track.source.key, e.javaClass.simpleName)
+                fail(gen, if (e is SourceAccessException) e.message.orEmpty() else "Playback request failed. Check your connection or log in again.")
+            }
         }
     }
 
@@ -231,9 +249,10 @@ object MusicPlayer {
         if (gen != generation) return
         state = State.ERROR
         message = msg
+        if (current?.source != MusicSource.NETEASE) return
         loader.execute {
             Thread.sleep(1500)
-            if (gen == generation && queue.size > 1) next()
+            if (gen == generation && queue.size > 1 && current?.source == MusicSource.NETEASE) next()
         }
     }
 

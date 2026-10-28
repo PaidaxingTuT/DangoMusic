@@ -2,11 +2,11 @@ package me.sorihiko.dango.party
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import me.sorihiko.dango.DangoLogger
 import me.sorihiko.dango.DangoMusic
 import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.NeteaseTrack
+import me.sorihiko.dango.music.MusicSource
 
 import java.security.SecureRandom
 import java.util.concurrent.Executors
@@ -14,25 +14,31 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 /**
- * 一起听歌（通过 Firebase 实时数据库同步）：
+ * 一起听歌（通过 [PartyTransport] 同步，默认是 Firebase 实时数据库）：
  *   房主：开房间 → 得到房间码；自己正常放歌，切歌 / 拖进度 / 暂停时把状态写到数据库
  *   成员：输入房间码加入 → 监听房间，自动放同一首歌、跳到同一位置、跟着暂停
- * 每个人都是自己从网易云拉歌，只同步"哪首歌、第几秒、在不在放"。
+ * 每个人按歌曲音源从自己的账号取歌，只同步歌曲信息、进度和播放状态。
  *
  * 数据结构：rooms/{房间码} = { host, hostName, members/{uid} = {name, lastSeen}, state = {...} }
+ * 每人只开一条监听，推下来的增量直接合并进本地 [RoomMirror]，平时不再读数据库。
  */
 object ListenParty {
 
     private const val CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
     private const val CODE_LENGTH = 5
     private const val ABANDONED_MS = 11 * 60_000L
+    private const val HEARTBEAT_MS = 30_000L
+    /** 房主没有变化时多久重发一次状态（兜底，正常的切歌 / 暂停 / 拖进度会立刻发） */
+    private const val STATE_REFRESH_MS = 30_000L
+    /** 成员多久没心跳算离开，至少要比 [HEARTBEAT_MS] 多留几轮 */
+    private const val MEMBER_TIMEOUT_MS = 90_000L
 
     enum class Role { NONE, HOST, MEMBER }
 
     class Member(val uid: String, val name: String, val lastSeen: Long)
 
     private class RemoteState(
-        val trackId: Long, val name: String, val artists: List<String>, val cover: String, val duration: Long,
+        val track: NeteaseTrack,
         val pos: Long, val playing: Boolean, val at: Long,
     )
 
@@ -52,19 +58,24 @@ object ListenParty {
     @Volatile var busy = false
         private set
 
+    /** 同步层，换中转 / 别的服务时只换这里 */
+    @Volatile var transport: PartyTransport = Firebase
+
     @Volatile private var remote: RemoteState? = null
     private var stopListen: (() -> Unit)? = null
+    private val mirror = RoomMirror()
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "Dango-Party").apply { isDaemon = true } }
     private val refreshPending = AtomicBoolean(false)
     private val rng = SecureRandom()
 
     // 房主：上一次发出去的状态
-    private var sentId = 0L
+    private var sentKey = ""
+    @Volatile private var roomProtocol = 1
     private var sentPlaying = false
     private var sentPos = 0L
     private var sentAt = 0L
     // 成员：已经请求加载的歌、上次纠正的时间
-    @Volatile private var requestedId = 0L
+    @Volatile private var requestedKey = ""
     private var lastCorrection = 0L
     private var lastHeartbeat = 0L
 
@@ -78,7 +89,7 @@ object ListenParty {
                         Role.MEMBER -> followTick()
                         Role.NONE -> {}
                     }
-                    if (role != Role.NONE && System.currentTimeMillis() - lastHeartbeat > 20_000) heartbeat()
+                    if (role != Role.NONE && System.currentTimeMillis() - lastHeartbeat > HEARTBEAT_MS) heartbeat()
                 } catch (e: InterruptedException) {
                     return@Thread
                 } catch (e: Exception) {
@@ -91,10 +102,14 @@ object ListenParty {
 
     private fun myName(): String = try { DangoMusic.instance.platform.playerName } catch (_: Exception) { "Player" }
 
-    private fun sv(): JsonElement = JsonParser().parse("""{".sv":"timestamp"}""")
+    private fun sv(): JsonElement = transport.serverTimestamp()
 
     private fun newCode(): String =
-        (1..CODE_LENGTH).map { CODE_ALPHABET[rng.nextInt(CODE_ALPHABET.length)] }.joinToString("")
+        "D-" + (1..CODE_LENGTH).map { CODE_ALPHABET[rng.nextInt(CODE_ALPHABET.length)] }.joinToString("")
+
+    fun supportsSource(source: MusicSource): Boolean = source == MusicSource.NETEASE ||
+        (source == MusicSource.QQ && (role == Role.NONE || roomProtocol >= 2)) ||
+        (source == MusicSource.KUGOU && (role == Role.NONE || roomProtocol >= 3))
 
     /**
      * 房主超过 [ABANDONED_MS] 没心跳的房间算废弃，可以被新房间接管。
@@ -104,7 +119,7 @@ object ListenParty {
         val host = room.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: return false
         val seen = ((room.get("members") as? JsonObject)?.get(host) as? JsonObject)
             ?.get("lastSeen")?.takeIf { it.isJsonPrimitive }?.asLong ?: return false
-        return Firebase.serverNow() - seen > ABANDONED_MS
+        return transport.serverNow() - seen > ABANDONED_MS
     }
 
     // ---------------------------------------------------------------- 开房 / 加入 / 离开
@@ -115,40 +130,48 @@ object ListenParty {
         status = "正在创建房间…"
         worker.execute {
             try {
-                if (!Firebase.configured) return@execute fail("还没配置 Firebase（firebase.properties）")
-                if (!Firebase.ensureAuth()) return@execute fail("连不上 Firebase（" + Firebase.lastStatus + "）")
-                Firebase.syncClock()
+                val net = transport
+                if (!net.configured) return@execute fail("还没配置 Firebase（firebase.properties）")
+                if (!net.ensureAuth()) return@execute fail(connectError(net, "连不上 Firebase（" + net.lastStatus + "）"))
+                net.syncClock()
                 repeat(8) {
                     val c = newCode()
                     // 先看这个码有没有人在用：没人用，或者房主已经很久没心跳（崩溃 / 直接关游戏留下的），才能拿来用
-                    val snap = Firebase.getWithEtag("rooms/$c") ?: return@repeat
+                    val snap = net.getWithEtag("rooms/$c")
+                    if (snap == null) {
+                        // 网络不通就别再换 7 个码挨个超时了
+                        if (net.lastStatus == -1) return@execute fail(connectError(net, "创建房间失败（-1）"))
+                        return@repeat
+                    }
                     val existing = snap.value as? JsonObject
                     if (existing != null && !isAbandoned(existing)) return@repeat
                     val room = JsonObject().apply {
-                        addProperty("host", Firebase.uid)
+                        addProperty("protocol", 3)
+                        addProperty("host", net.uid)
                         addProperty("hostName", myName())
                         add("createdAt", sv())
                         add("members", JsonObject().apply {
-                            add(Firebase.uid, JsonObject().apply {
+                            add(net.uid, JsonObject().apply {
                                 addProperty("name", myName())
                                 add("lastSeen", sv())
                             })
                         })
                     }
                     // 带上刚才读到的版本号：这期间要是别人抢先建了同一个码，写入会失败（412），换个码再试
-                    if (Firebase.putIfUnchanged("rooms/$c", room, snap.etag) != null) {
+                    if (net.putIfUnchanged("rooms/$c", room, snap.etag) != null) {
                         code = c
-                        hostUid = Firebase.uid
+                        hostUid = net.uid
                         hostName = myName()
                         role = Role.HOST
-                        sentId = 0L                      // 马上把当前播放状态发出去
+                        roomProtocol = 3
+                        sentKey = ""
                         lastHeartbeat = System.currentTimeMillis()
                         startListening()
                         status = ""
                         return@execute
                     }
                 }
-                fail("创建房间失败（" + Firebase.lastStatus + "）")
+                fail(connectError(net, "创建房间失败（" + net.lastStatus + "）"))
             } finally {
                 busy = false
             }
@@ -162,22 +185,28 @@ object ListenParty {
         status = "正在加入 $c …"
         worker.execute {
             try {
-                if (!Firebase.configured) return@execute fail("还没配置 Firebase（firebase.properties）")
-                if (!Firebase.ensureAuth()) return@execute fail("连不上 Firebase（" + Firebase.lastStatus + "）")
-                Firebase.syncClock()
-                val room = Firebase.get("rooms/$c")
-                if (room == null || !room.isJsonObject) return@execute fail("房间 $c 不存在")
+                val net = transport
+                if (!net.configured) return@execute fail("还没配置 Firebase（firebase.properties）")
+                if (!net.ensureAuth()) return@execute fail(connectError(net, "连不上 Firebase（" + net.lastStatus + "）"))
+                net.syncClock()
+                val room = net.get("rooms/$c")
+                    // 读失败（null）和房间不存在（读到空值）分开说
+                    ?: return@execute fail(connectError(net, "加入失败（" + net.lastStatus + "）"))
+                if (!room.isJsonObject) return@execute fail("房间 $c 不存在")
                 if (isAbandoned(room.asJsonObject)) return@execute fail("房间 $c 已经没人了")
+                val protocol = room.asJsonObject.get("protocol")?.asInt ?: 1
+                if (protocol !in 1..3) return@execute fail("This room requires a newer DangoMusic version.")
                 val me = JsonObject().apply {
                     addProperty("name", myName())
                     add("lastSeen", sv())
                 }
-                if (Firebase.put("rooms/$c/members/${Firebase.uid}", me) == null) {
-                    return@execute fail("加入失败（" + Firebase.lastStatus + "）")
+                if (net.put("rooms/$c/members/${net.uid}", me) == null) {
+                    return@execute fail(connectError(net, "加入失败（" + net.lastStatus + "）"))
                 }
                 code = c
                 role = Role.MEMBER
-                requestedId = 0L
+                roomProtocol = protocol
+                requestedKey = ""
                 MusicPlayer.followMode = true
                 lastHeartbeat = System.currentTimeMillis()
                 apply(room.asJsonObject)
@@ -199,7 +228,8 @@ object ListenParty {
         val wasHost = role == Role.HOST
         abandonLocally()
         try {
-            if (wasHost) Firebase.delete("rooms/$c") else Firebase.delete("rooms/$c/members/${Firebase.uid}")
+            val net = transport
+            if (wasHost) net.delete("rooms/$c") else net.delete("rooms/$c/members/${net.uid}")
         } catch (_: Exception) {
         }
     }
@@ -208,19 +238,31 @@ object ListenParty {
     private fun abandonLocally() {
         stopListen?.invoke()
         stopListen = null
+        mirror.clear()
         role = Role.NONE
         code = ""
         hostUid = ""
         hostName = ""
         members = emptyList()
         remote = null
+        roomProtocol = 1
+        requestedKey = ""
         MusicPlayer.followMode = false
     }
 
     /** 成员：重新和房主对齐（自己点了别的歌之后想回来时用） */
     fun resync() {
-        requestedId = 0L
+        requestedKey = ""
         lastCorrection = 0L
+    }
+
+    /** 连不上时告诉玩家卡在哪：登录服务、数据库还是代理；服务器拒绝等其他情况用 [fallback] */
+    private fun connectError(net: PartyTransport, fallback: String): String = when (net.lastFailure) {
+        PartyTransport.Failure.AUTH_UNREACHABLE -> "连不上 Google 登录服务。国内网络通常需要开代理，可在“连接方式”里设置"
+        PartyTransport.Failure.SERVER_UNREACHABLE -> "连不上 Firebase 数据库。国内网络通常需要开代理，可在“连接方式”里设置"
+        PartyTransport.Failure.PROXY_UNREACHABLE -> "代理连不上。请确认代理软件已打开、端口正确，或在“连接方式”里换一种"
+        PartyTransport.Failure.RELAY_UNREACHABLE -> "中转和直连 Firebase 都连不上。请检查网络，或在“连接方式”里开代理"
+        else -> fallback
     }
 
     private fun fail(msg: String) {
@@ -232,30 +274,43 @@ object ListenParty {
 
     private fun startListening() {
         stopListen?.invoke()
+        mirror.clear()
         val c = code
-        stopListen = Firebase.listen("rooms/$c") {
-            // 变化可能一下来好几条，合并成一次刷新
+        stopListen = transport.listen("rooms/$c") { e ->
+            // 已经退出 / 换了房间时，旧连接最后推来的一条不要混进来
+            if (code != c) return@listen
+            mirror.apply(e)
+            // 变化可能一下来好几条（比如几个人的心跳），合并成一次处理
             if (refreshPending.compareAndSet(false, true)) {
                 worker.execute {
                     refreshPending.set(false)
                     if (code != c || role == Role.NONE) return@execute
-                    val room = Firebase.get("rooms/$c")
-                    if (room == null || !room.isJsonObject) {
-                        if (Firebase.lastStatus in 200..299 && role == Role.MEMBER) {
-                            leaveNow()
-                            status = "房主关闭了房间"
-                        }
-                        return@execute
-                    }
-                    val newHost = room.asJsonObject.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
-                    if (hostUid.isNotEmpty() && newHost != hostUid) {
-                        // 掉线太久，房间码已经被别人的新房间接管了：本地退出，别去碰别人的房间
-                        abandonLocally()
-                        status = "房间已失效（掉线太久），请重新创建或加入"
-                        return@execute
-                    }
-                    apply(room.asJsonObject)
+                    onRoomChanged()
                 }
+            }
+        }
+    }
+
+    private fun onRoomChanged() {
+        val gone = mirror.read { room ->
+            when {
+                room == null -> "closed"
+                (room.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: "").let { hostUid.isNotEmpty() && it != hostUid } -> "taken"
+                else -> {
+                    apply(room)
+                    null
+                }
+            }
+        }
+        when (gone) {
+            "closed" -> if (role == Role.MEMBER) {
+                leaveNow()
+                status = "房主关闭了房间"
+            }
+            // 掉线太久，房间码已经被别人的新房间接管了：本地退出，别去碰别人的房间
+            "taken" -> {
+                abandonLocally()
+                status = "房间已失效（掉线太久），请重新创建或加入"
             }
         }
     }
@@ -263,21 +318,18 @@ object ListenParty {
     private fun apply(room: JsonObject) {
         hostUid = room.get("host")?.asString ?: ""
         hostName = room.get("hostName")?.asString ?: ""
-        val now = Firebase.serverNow()
+        val now = transport.serverNow()
         members = (room.get("members") as? JsonObject)?.entrySet()?.mapNotNull { (uid, v) ->
             val o = v as? JsonObject ?: return@mapNotNull null
             val seen = o.get("lastSeen")?.let { if (it.isJsonPrimitive) it.asLong else 0L } ?: 0L
-            if (now - seen > 90_000) null else Member(uid, o.get("name")?.asString ?: "?", seen)
+            if (now - seen > MEMBER_TIMEOUT_MS) null else Member(uid, o.get("name")?.asString ?: "?", seen)
         }?.sortedBy { if (it.uid == hostUid) 0 else 1 } ?: emptyList()
 
         val st = room.get("state") as? JsonObject
         remote = if (st == null) null else try {
-            RemoteState(
-                trackId = st.get("trackId").asLong,
-                name = st.get("name")?.asString ?: "",
-                artists = (st.get("artists")?.asString ?: "").split(" / ").filter { it.isNotEmpty() },
-                cover = st.get("cover")?.asString ?: "",
-                duration = st.get("duration")?.asLong ?: 0L,
+            val track = PartyTrackCodec.read(st)
+            if (track == null || !supportsSource(track.source)) null else RemoteState(
+                track = track,
                 pos = st.get("pos")?.asLong ?: 0L,
                 playing = st.get("playing")?.asBoolean ?: false,
                 at = st.get("at")?.asLong ?: now,
@@ -291,59 +343,55 @@ object ListenParty {
         lastHeartbeat = System.currentTimeMillis()
         val c = code
         if (c.isEmpty()) return
-        Firebase.patch("rooms/$c/members/${Firebase.uid}", JsonObject().apply { add("lastSeen", sv()) })
+        val net = transport
+        net.patch("rooms/$c/members/${net.uid}", JsonObject().apply { add("lastSeen", sv()) })
     }
 
     // ---------------------------------------------------------------- 房主：把自己的播放状态发出去
 
     private fun hostTick() {
         val cur = MusicPlayer.current ?: return
+        if (!supportsSource(cur.source)) return
         val st = MusicPlayer.state
         val now = System.currentTimeMillis()
         if (st == MusicPlayer.State.LOADING || st == MusicPlayer.State.ERROR) {
             // 切歌了先告诉大家开始加载这首（暂停状态），真正开始放时再发一次
-            if (cur.id != sentId) send(cur, 0L, false)
+            if (cur.key != sentKey) send(cur, 0L, false)
             return
         }
         val playing = st == MusicPlayer.State.PLAYING
         val pos = MusicPlayer.positionMs
         val predicted = sentPos + if (sentPlaying) now - sentAt else 0L
-        val changed = cur.id != sentId || playing != sentPlaying || abs(pos - predicted) > 1500 || now - sentAt > 15_000
+        val changed = cur.key != sentKey || playing != sentPlaying || abs(pos - predicted) > 1500 || now - sentAt > STATE_REFRESH_MS
         if (changed) send(cur, pos, playing)
     }
 
     private fun send(t: NeteaseTrack, pos: Long, playing: Boolean) {
         val now = System.currentTimeMillis()
-        sentId = t.id
+        sentKey = t.key
         sentPlaying = playing
         sentPos = pos
         sentAt = now
-        val o = JsonObject().apply {
-            addProperty("trackId", t.id)
-            addProperty("name", t.name)
-            addProperty("artists", t.artists.joinToString(" / "))
-            addProperty("cover", t.coverUrl)
-            addProperty("duration", t.durationMs)
+        val o = PartyTrackCodec.write(t).apply {
             addProperty("pos", pos)
             addProperty("playing", playing)
-            addProperty("at", Firebase.serverNow())
+            addProperty("at", transport.serverNow())
         }
-        Firebase.put("rooms/$code/state", o)
+        transport.put("rooms/$code/state", o)
     }
 
     // ---------------------------------------------------------------- 成员：跟着房主放
 
     private fun expectedPos(s: RemoteState): Long =
-        s.pos + if (s.playing) (Firebase.serverNow() - s.at).coerceAtLeast(0L) else 0L
+        s.pos + if (s.playing) (transport.serverNow() - s.at).coerceAtLeast(0L) else 0L
 
     private fun followTick() {
         val s = remote ?: return
         val cur = MusicPlayer.current
-        if (cur?.id != s.trackId) {
-            if (requestedId != s.trackId) {
-                requestedId = s.trackId
-                val track = NeteaseTrack(s.trackId, s.name, s.artists, s.duration, s.cover)
-                MusicPlayer.playTrackAt(track, { expectedPos(s) }, !s.playing)
+        if (cur?.key != s.track.key || (MusicPlayer.state == MusicPlayer.State.ERROR && requestedKey != s.track.key)) {
+            if (requestedKey != s.track.key) {
+                requestedKey = s.track.key
+                MusicPlayer.playTrackAt(s.track, { expectedPos(s) }, !s.playing)
                 lastCorrection = System.currentTimeMillis()
             }
             return

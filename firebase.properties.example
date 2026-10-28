@@ -3,3 +3,5 @@
 # Firebase 控制台 → 项目设置 → 常规 → 你的应用（Web）里能找到这两个值。
 apiKey=AIzaSy...
 databaseUrl=https://your-project-default-rtdb.firebaseio.com
+# 可选：一起听歌中转地址（转发 Firebase 请求的 Cloudflare Worker）。留空就直连 Firebase。
+relayUrl=

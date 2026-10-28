@@ -24,7 +24,7 @@ class ModernMusicScreen(
     override fun isPauseScreen() = false
 
     override fun onRender() {
-        screen.render()
+        screen.render(McCompat.renderMenuBackdrop(parent))
     }
 
     override fun onMouseClicked(button: Int) {
