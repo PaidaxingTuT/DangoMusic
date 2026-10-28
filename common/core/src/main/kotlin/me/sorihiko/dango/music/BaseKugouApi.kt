@@ -117,10 +117,18 @@ abstract class BaseKugouApi {
             }.toString()
             parsePage(accountPost("/v7/get_all_list", postData, userId, token))
         }
-        return items.sortedByDescending { playlistAddedAt(it) }.mapNotNull { o ->
+        return items.sortedWith(compareBy<JsonObject> { playlistPinOrder(it) }
+            .thenByDescending { playlistAddedAt(it) }).mapNotNull { o ->
             val listId = o.text("listid").toLongOrNull() ?: return@mapNotNull null
             val count = o.text("count").toIntOrNull() ?: 0
-            val cover = playlistCover(o).ifEmpty {
+            val serverCover = playlistCover(o)
+            val newestLikedCover = if (count > 0 && o.text("is_custom_pic") != "1" &&
+                (o.text("name") in listOf("我喜欢", "我喜欢的音乐") || o.text("is_def") == "1")) {
+                runCatching {
+                    getPlaylistTracks(listId, userId, token).firstOrNull()?.coverUrl.orEmpty()
+                }.getOrDefault("")
+            } else ""
+            val cover = newestLikedCover.ifEmpty { serverCover }.ifEmpty {
                 if (count == 0) "" else runCatching {
                     val page = cloudTrackPage(listId, userId, token, 1, 10)
                     page.getAsJsonArray("info")?.asSequence()?.filter { it.isJsonObject }
@@ -143,7 +151,7 @@ abstract class BaseKugouApi {
      */
     fun getPlaylistTracks(listId: Long, userId: Long, token: String): List<NeteaseTrack> {
         val items = pagedItems(300) { page -> cloudTrackPage(listId, userId, token, page, 300) }
-        return items.mapNotNull { parsePlaylistTrack(it) }
+        return items.sortedByDescending { trackCollectedAt(it) }.mapNotNull { parsePlaylistTrack(it) }
     }
 
     private fun cloudTrackPage(listId: Long, userId: Long, token: String, page: Int, pageSize: Int): JsonObject {
@@ -168,7 +176,7 @@ abstract class BaseKugouApi {
             val query = signAndBuild(params, salt)
             parsePage(httpGet("https://gateway.kugou.com/api/v3/special/song$query", mapOf("x-router" to "mobilecdn.kugou.com")))
         }
-        return items.mapNotNull { parsePlaylistTrack(it) }
+        return items.sortedByDescending { trackCollectedAt(it) }.mapNotNull { parsePlaylistTrack(it) }
     }
 
     private fun JsonObject.text(key: String): String = get(key)?.takeIf { it.isJsonPrimitive }?.asString ?: ""
@@ -191,9 +199,23 @@ abstract class BaseKugouApi {
             .map { coverUrl(o.text(it)) }.firstOrNull { it.isNotEmpty() }
             ?: coverUrl(o.get("trans_param")?.takeIf { it.isJsonObject }?.asJsonObject?.text("union_cover").orEmpty())
 
+    /** 默认歌单固定在前，其余歌单再按添加时间排列。 */
+    private fun playlistPinOrder(o: JsonObject): Int = when {
+        o.text("name") in listOf("我喜欢", "我喜欢的音乐") -> 0
+        o.text("name") == "默认收藏" -> 1
+        o.text("is_def") in listOf("1", "2") || o.text("is_default") == "1" -> 1
+        else -> 2
+    }
+
     private fun playlistAddedAt(o: JsonObject): Long =
-        sequenceOf("collecttime", "addtime", "add_time", "create_time")
-            .mapNotNull { o.text(it).toLongOrNull()?.takeIf { n -> n > 0 } }
+        timestamp(o, "collecttime", "addtime", "add_time", "create_time")
+
+    private fun trackCollectedAt(o: JsonObject): Long =
+        timestamp(o, "collecttime", "collect_time", "addtime", "add_time")
+
+    /** 同时兼容秒和毫秒；无效时间沉底，同一时间维持接口顺序。 */
+    private fun timestamp(o: JsonObject, vararg fields: String): Long =
+        fields.asSequence().mapNotNull { o.text(it).toLongOrNull()?.takeIf { n -> n > 0 } }
             .map { if (it < 100_000_000_000L) it * 1000 else it }.firstOrNull() ?: 0L
 
     internal fun parsePlaylistTrack(o: JsonObject): NeteaseTrack? {

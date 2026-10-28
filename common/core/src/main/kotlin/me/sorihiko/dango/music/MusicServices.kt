@@ -17,6 +17,11 @@ object MusicServices {
     var current: MusicPlatformService = NETEASE
         private set
 
+    /** 在客户端和配置目录初始化后调用，仅检查本地登录凭证。 */
+    fun selectStartupPlatform() {
+        current = all.firstOrNull { runCatching { it.loggedIn }.getOrDefault(false) } ?: NETEASE
+    }
+
     fun select(service: MusicPlatformService) {
         current = service
     }

@@ -6,7 +6,6 @@ import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.gfx.Texture
 import me.sorihiko.dango.music.AccountLogin
 import me.sorihiko.dango.music.MusicScreen
-import me.sorihiko.dango.music.NeteaseLogin
 import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.platform.Keys
 import me.sorihiko.dango.ui.LayoutBounds
@@ -29,7 +28,7 @@ internal class LoginDialog(private val screen: MusicScreen) {
         private var qrUploaded = -1
 
         /** 当前登录的目标平台账号 */
-        var currentLogin: AccountLogin = NeteaseLogin
+        var currentLogin: AccountLogin = MusicServices.current.login
             private set
 
         val availableLogins get() = MusicServices.all.map { it.login }
@@ -40,7 +39,6 @@ internal class LoginDialog(private val screen: MusicScreen) {
                 currentLogin = login
                 qrUploaded = -1
                 MusicServices.select(MusicServices.forLogin(login))
-                updateAccentColor()
                 Library.refreshAll()
                 if (showing) {
                     currentLogin.start()
@@ -48,9 +46,6 @@ internal class LoginDialog(private val screen: MusicScreen) {
             }
         }
 
-        private fun updateAccentColor() {
-            ACCENT_COLOR = Color.fromHex(MusicServices.current.accentColor)
-        }
     }
 
     val visible: Boolean get() = showing

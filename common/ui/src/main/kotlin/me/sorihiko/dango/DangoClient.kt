@@ -10,6 +10,7 @@ import me.sorihiko.dango.module.impls.music.KugouMusicModule
 import me.sorihiko.dango.module.impls.music.KugouLiteMusicModule
 import me.sorihiko.dango.module.impls.music.SongCardModule
 import me.sorihiko.dango.music.MusicScreen
+import me.sorihiko.dango.music.MusicServices
 import me.sorihiko.dango.platform.Platform
 
 /**
@@ -36,6 +37,7 @@ object DangoClient {
                 DynamicIslandModule(),
             ),
         )
+        MusicServices.selectStartupPlatform()
         musicModule.applyLanguage() // ConfigManager 已读回手动选择，优先于首次默认值。
     }
 

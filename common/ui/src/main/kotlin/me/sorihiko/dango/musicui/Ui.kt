@@ -14,11 +14,8 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 
-/** 播放器当前平台的主色（可随选中的平台动态切换） */
-internal var ACCENT_COLOR: Color = Color.fromHex("#FF375F")
-
-/** 兼容旧代码引用的网易云红 / 界面主色 */
-internal val RED: Color get() = ACCENT_COLOR
+/** 界面主色始终跟随当前平台，包括启动时自动选择的已登录平台。 */
+internal val RED: Color get() = Color.fromHex(me.sorihiko.dango.music.MusicServices.current.accentColor)
 
 /** 一块可点击区域和点下去要做的事 */
 internal typealias Hit = Pair<LayoutBounds, () -> Unit>

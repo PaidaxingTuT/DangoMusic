@@ -193,15 +193,76 @@ class KugouPlaylistTest {
                 """{"status":1,"data":{"total":5,"info":[$rows]}}"""
             }
             val list = api.getUserPlaylists(99, "token")
-            assertEquals(listOf(3L, 4L, 1L, 2L, 5L), list.map { it.id })
-            assertEquals("https://c1.kgimg.com/custom/400/c.jpg", list[0].coverUrl)
-            assertEquals("https://imge.kugou.com/stdmusic/400/d.jpg", list[1].coverUrl)
+            assertEquals(listOf(4L, 3L, 1L, 2L, 5L), list.map { it.id })
+            assertEquals("https://imge.kugou.com/stdmusic/400/d.jpg", list[0].coverUrl)
+            assertEquals("https://c1.kgimg.com/custom/400/c.jpg", list[1].coverUrl)
             assertEquals("https://imge.kugou.com/stdmusic/400/2023/a.jpg", list[2].coverUrl)
             assertEquals("https://imge.kugou.com/soft/collection/400/b.jpg", list[3].coverUrl)
-            assertEquals(false, list[0].owned)
-            assertEquals(false, list[0].liked)
-            assertTrue(list[1].liked)
+            assertTrue(list[0].liked)
+            assertEquals(false, list[1].owned)
+            assertEquals(false, list[1].liked)
             assertEquals(2, api.seen.size)
+        }
+    }
+
+    @Test fun favoritesStayPinnedEvenWhenNewerPlaylistsArriveOnAnotherPage() {
+        for (config in listOf(KugouApi, KugouLiteApi)) {
+            val api = RecordingApi(config) { request ->
+                val page = JsonParser().parse(request.body).asJsonObject.get("page").asInt
+                val rows = if (page == 1)
+                    """{"listid":1,"name":"new playlist","count":0,"addtime":1900000000},
+                        {"listid":2,"name":"默认收藏","count":0,"is_def":2,"addtime":1600000000}"""
+                else """{"listid":3,"name":"我喜欢","count":0,"is_def":1},
+                        {"listid":4,"name":"older playlist","count":0,"addtime":1800000000}"""
+                """{"status":1,"data":{"total":4,"info":[$rows]}}"""
+            }
+            assertEquals(listOf("我喜欢", "默认收藏", "new playlist", "older playlist"),
+                api.getUserPlaylists(99, "token").map { it.name })
+            assertEquals(2, api.seen.size)
+        }
+    }
+
+    @Test fun allUserPlaylistsSortTracksByCollectionTimeAfterCombiningPages() {
+        for (config in listOf(KugouApi, KugouLiteApi)) {
+            val api = RecordingApi(config) { request ->
+                val body = JsonParser().parse(request.body).asJsonObject
+                val rows = if (body.get("page").asInt == 1)
+                    """{"hash":"OLD","name":"old","collecttime":1700000000,"sort":0},
+                        {"hash":"UNKNOWN","name":"unknown","collecttime":null},
+                        {"hash":"TIE1","name":"tie1","collecttime":1800000000}"""
+                else """{"hash":"NEW","name":"new","collecttime":"1900000000000","sort":99},
+                        {"hash":"TIE2","name":"tie2","collecttime":1800000000000},
+                        {"hash":"INVALID","name":"invalid","collecttime":"bad"}"""
+                """{"status":1,"data":{"total":6,"info":[$rows]}}"""
+            }
+            for (id in listOf(1L, 2L, 3L)) { // 我喜欢、默认收藏、普通歌单都使用同一接口
+                assertEquals(listOf("new", "tie1", "tie2", "old", "unknown", "invalid"),
+                    api.getPlaylistTracks(id, 99, "token").map { it.name })
+            }
+            assertEquals(6, api.seen.size)
+        }
+    }
+
+    @Test fun likedCoverUsesNewestCollectedSongAcrossAllPages() {
+        for (config in listOf(KugouApi, KugouLiteApi)) {
+            val api = RecordingApi(config) { request ->
+                val body = JsonParser().parse(request.body).asJsonObject
+                if ("/v7/get_all_list?" in request.url) {
+                    """{"status":1,"data":{"info":[{"listid":1,"name":"我喜欢","count":2,"pic":"https://example.com/old.jpg"},
+                        {"listid":2,"name":"我喜欢的音乐","count":2,"is_custom_pic":1,"pic":"https://example.com/custom.jpg"}]}}"""
+                } else {
+                    assertEquals(1, body.get("listid").asInt, "Keep explicitly selected artwork")
+                    assertEquals(300, body.get("pagesize").asInt)
+                    val song = if (body.get("page").asInt == 1)
+                        """{"hash":"OLD","name":"old","collecttime":1700000000,"cover":"https://example.com/old.jpg"}"""
+                    else """{"hash":"NEW","name":"new","collecttime":1800000000000,"cover":"https://example.com/new.jpg"}"""
+                    """{"status":1,"data":{"total":2,"info":[$song]}}"""
+                }
+            }
+            val list = api.getUserPlaylists(99, "token")
+            assertEquals("https://example.com/new.jpg", list.first { it.id == 1L }.coverUrl)
+            assertEquals("https://example.com/custom.jpg", list.first { it.id == 2L }.coverUrl)
+            assertEquals(3, api.seen.size)
         }
     }
 
