@@ -23,6 +23,8 @@ class NeteasePlaylist(
     val owned: Boolean,
     val platform: String = "NetEase",
     val kind: PlaylistKind = PlaylistKind.CLOUD,
+    /** 平台明确标记的“我喜欢”，避免排序后误认第一个歌单。 */
+    val liked: Boolean = false,
 ) {
     val cacheKey: String get() = "$platform:$kind:$id"
 }

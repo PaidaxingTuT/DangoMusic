@@ -179,6 +179,77 @@ class KugouPlaylistTest {
         assertEquals("云歌曲", cloudTrack.name)
     }
 
+    @Test fun userPlaylistsSortAcrossPagesAndNormalizeCoverSources() {
+        for (config in listOf(KugouApi, KugouLiteApi)) {
+            val api = RecordingApi(config) { request ->
+                val body = JsonParser().parse(request.body).asJsonObject
+                val rows = when (body.get("page").asInt) {
+                    1 -> """{"listid":1,"name":"old","count":0,"create_time":1700000000,"pic":"stdmusic/2023/a.jpg"},
+                        {"listid":2,"name":"unknown","count":0,"pic":null,"imgurl":"//imge.kugou.com/soft/collection/{size}/b.jpg"}"""
+                    else -> """{"listid":3,"name":"new","count":0,"addtime":1800000000000,"create_time":1600000000,"pic":"bad","cover":"custom/{size}/c.jpg","type":1},
+                        {"listid":4,"name":"我喜欢","count":0,"collecttime":1800000000,"pic":"","trans_param":{"union_cover":"stdmusic/{size}/d.jpg"}},
+                        {"listid":5,"name":"also unknown","count":0,"create_time":"invalid"}"""
+                }
+                """{"status":1,"data":{"total":5,"info":[$rows]}}"""
+            }
+            val list = api.getUserPlaylists(99, "token")
+            assertEquals(listOf(3L, 4L, 1L, 2L, 5L), list.map { it.id })
+            assertEquals("https://c1.kgimg.com/custom/400/c.jpg", list[0].coverUrl)
+            assertEquals("https://imge.kugou.com/stdmusic/400/d.jpg", list[1].coverUrl)
+            assertEquals("https://imge.kugou.com/stdmusic/400/2023/a.jpg", list[2].coverUrl)
+            assertEquals("https://imge.kugou.com/soft/collection/400/b.jpg", list[3].coverUrl)
+            assertEquals(false, list[0].owned)
+            assertEquals(false, list[0].liked)
+            assertTrue(list[1].liked)
+            assertEquals(2, api.seen.size)
+        }
+    }
+
+    @Test fun missingPlaylistArtUsesSongCoverAndFailuresKeepPlaylist() {
+        for (config in listOf(KugouApi, KugouLiteApi)) {
+            val api = RecordingApi(config) { request ->
+                val body = JsonParser().parse(request.body).asJsonObject
+                if ("/v7/get_all_list?" in request.url) {
+                    """{"status":1,"data":{"info":[{"listid":1,"name":"auto cover","count":1},
+                        {"listid":2,"name":"failed cover","count":1},{"listid":3,"name":"empty","count":0}]}}"""
+                } else {
+                    assertEquals(10, body.get("pagesize").asInt)
+                    assertEquals(1, body.get("show_cover").asInt)
+                    if (body.get("listid").asInt == 1)
+                        """{"status":1,"data":{"info":[{"hash":"ABC","name":"Song","trans_param":{"union_cover":"http://imge.kugou.com/stdmusic/{size}/song.jpg"}}]}}"""
+                    else """{"status":0}"""
+                }
+            }
+            val list = api.getUserPlaylists(99, "token")
+            assertEquals(3, list.size)
+            assertEquals("https://imge.kugou.com/stdmusic/400/song.jpg", list[0].coverUrl)
+            assertEquals("", list[1].coverUrl)
+            assertEquals("", list[2].coverUrl)
+            assertEquals(3, api.seen.size)
+        }
+    }
+
+    @Test fun recommendationsUseDedicatedEndpointAndCorrectCoverInsteadOfAvatar() {
+        for (config in listOf(KugouApi, KugouLiteApi)) {
+            val api = RecordingApi(config) { request ->
+                assertEquals("/v2/special_recommend", URI(request.url).path)
+                assertEquals("specialrec.service.kugou.com", request.headers["x-router"])
+                val body = JsonParser().parse(request.body).asJsonObject
+                assertEquals(30, body.get("pagesize").asInt)
+                assertEquals(config.appid, body.get("appid").asInt)
+                val rows = (1..30).joinToString(",") { id ->
+                    """{"specialid":$id,"specialname":"Playlist $id","flexible_cover":"https://c1.kgimg.com/custom/{size}/$id.jpg","pic":"https://imge.kugou.com/avatar.jpg"}"""
+                }
+                """{"status":1,"data":{"special_list":[$rows,{"specialid":1,"specialname":"duplicate"},{"specialid":0}]}}"""
+            }
+            val list = api.recommendPlaylists()
+            assertEquals(30, list.size)
+            assertEquals("https://c1.kgimg.com/custom/400/1.jpg", list.first().coverUrl)
+            assertTrue(list.all { it.platform == config.trackPlatform && it.kind == PlaylistKind.SPECIAL })
+            assertEquals(1, api.seen.size)
+        }
+    }
+
     @Test fun separatesPlaylistSources() {
         val cloud = NeteasePlaylist(1, "", 0, "", true, "KuGou")
         val public = NeteasePlaylist(1, "", 0, "", false, "KuGou", PlaylistKind.SPECIAL)

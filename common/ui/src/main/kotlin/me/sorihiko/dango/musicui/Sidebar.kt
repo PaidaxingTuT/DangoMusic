@@ -115,7 +115,7 @@ internal class Sidebar(private val screen: MusicScreen) {
         val list = Library.playlists
         scroll = scroll.coerceIn(0, max(0, list.size - rows))
         scrollPos = ui.easeScroll(scrollPos, scroll, rows * 3)
-        val firstOwned = list.indexOfFirst { it.owned }
+        val firstOwned = list.indexOfFirst { it.platform == "NetEase" && it.owned }
         val first = kotlin.math.floor(scrollPos).toInt()
         val frac = scrollPos - first
         ui.beginClip(listArea)
@@ -132,7 +132,7 @@ internal class Sidebar(private val screen: MusicScreen) {
             } else if (ui.hover(row)) {
                 ui.card(row, Theme.CARD_HOVER, 9f)
             }
-            val liked = i == firstOwned   // 第一个自己的歌单就是"我喜欢的音乐"
+            val liked = p.liked || i == firstOwned
             ui.icon(if (liked) "♥" else "≡", row.x + 18f, row.y + 14f, 12f, if (liked || active) RED else Theme.TEXT_SECONDARY)
             val c = if (active) Theme.TEXT_PRIMARY else if (p.owned) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
             ui.text(ui.trim(p.name, row.right - 8f - (row.x + 34f), 12f), row.x + 34f, row.y + 9f, 12f, c)

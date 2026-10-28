@@ -77,12 +77,17 @@ abstract class BaseKugouApi {
     /** 账号接口统一注入身份参数，并把同一份 JSON 请求体纳入签名。 */
     internal fun buildAccountRequest(path: String, body: String, userId: Long, token: String, router: String = "cloudlist.service.kugou.com"): KugouRequest {
         require(userId > 0 && token.isNotEmpty()) { "Kugou credentials missing" }
+        return buildSignedRequest(path, body, userId, token, router)
+    }
+
+    private fun buildSignedRequest(path: String, body: String, userId: Long, token: String, router: String): KugouRequest {
         val now = (System.currentTimeMillis() / 1000).toString()
         val params = linkedMapOf(
             "appid" to appid.toString(), "clientver" to clientver.toString(), "clienttime" to now,
             "dfid" to "-", "mid" to "1", "uuid" to "-", "plat" to "1",
-            "userid" to userId.toString(), "token" to token,
         )
+        if (userId > 0) params["userid"] = userId.toString()
+        if (token.isNotEmpty()) params["token"] = token
         return KugouRequest(
             "https://gateway.kugou.com$path${signAndBuild(params, salt, body)}", body,
             mapOf("x-router" to router, "mid" to "1", "dfid" to "-", "clienttime" to now, "Content-Type" to "application/json;charset=utf-8"),
@@ -112,11 +117,22 @@ abstract class BaseKugouApi {
             }.toString()
             parsePage(accountPost("/v7/get_all_list", postData, userId, token))
         }
-        return items.mapNotNull { o ->
-            val listId = o.get("listid")?.asLong ?: return@mapNotNull null
+        return items.sortedByDescending { playlistAddedAt(it) }.mapNotNull { o ->
+            val listId = o.text("listid").toLongOrNull() ?: return@mapNotNull null
+            val count = o.text("count").toIntOrNull() ?: 0
+            val cover = playlistCover(o).ifEmpty {
+                if (count == 0) "" else runCatching {
+                    val page = cloudTrackPage(listId, userId, token, 1, 10)
+                    page.getAsJsonArray("info")?.asSequence()?.filter { it.isJsonObject }
+                        ?.mapNotNull { parsePlaylistTrack(it.asJsonObject) }
+                        ?.firstOrNull { it.coverUrl.isNotEmpty() }?.coverUrl.orEmpty()
+                }.getOrDefault("")
+            }
             NeteasePlaylist(
-                listId, o.text("name"), o.get("count")?.asInt ?: 0,
-                coverUrl(o.text("pic")), owned = true, platform = trackPlatform,
+                listId, o.text("name"), count, cover,
+                owned = o.text("list_create_userid").toLongOrNull()?.let { it == userId } ?: (o.text("type") != "1"),
+                platform = trackPlatform,
+                liked = o.text("is_def") in listOf("1", "2") || o.text("is_default") == "1" || o.text("name") in listOf("我喜欢", "我喜欢的音乐"),
             )
         }
     }
@@ -126,21 +142,23 @@ abstract class BaseKugouApi {
      * 使用当前 cloudlist Android 签名 JSON 协议。
      */
     fun getPlaylistTracks(listId: Long, userId: Long, token: String): List<NeteaseTrack> {
-        val items = pagedItems(300) { page ->
-            val postData = JsonObject().apply {
-                addProperty("listid", listId)
-                addProperty("userid", userId)
-                addProperty("token", token)
-                addProperty("type", 0)
-                addProperty("page", page)
-                addProperty("pagesize", 300)
-                addProperty("area_code", 1)
-                addProperty("allplatform", 1)
-                addProperty("show_cover", 1)
-            }.toString()
-            parsePage(accountPost("/v4/get_list_all_file_v3", postData, userId, token))
-        }
+        val items = pagedItems(300) { page -> cloudTrackPage(listId, userId, token, page, 300) }
         return items.mapNotNull { parsePlaylistTrack(it) }
+    }
+
+    private fun cloudTrackPage(listId: Long, userId: Long, token: String, page: Int, pageSize: Int): JsonObject {
+        val body = JsonObject().apply {
+            addProperty("listid", listId)
+            addProperty("userid", userId)
+            addProperty("token", token)
+            addProperty("type", 0)
+            addProperty("page", page)
+            addProperty("pagesize", pageSize)
+            addProperty("area_code", 1)
+            addProperty("allplatform", 1)
+            addProperty("show_cover", 1)
+        }.toString()
+        return parsePage(accountPost("/v4/get_list_all_file_v3", body, userId, token))
     }
 
     /** 公开推荐歌单使用 specialid，不能传给用户云歌单的 listid 接口。 */
@@ -154,7 +172,29 @@ abstract class BaseKugouApi {
     }
 
     private fun JsonObject.text(key: String): String = get(key)?.takeIf { it.isJsonPrimitive }?.asString ?: ""
-    private fun coverUrl(template: String) = template.replace("{size}", "400").replace("http://", "https://")
+    private fun coverUrl(template: String): String {
+        val url = template.trim().replace("{size}", "400")
+        return when {
+            url.isEmpty() -> ""
+            url.startsWith("//") -> "https:$url"
+            url.startsWith("http://") -> "https://" + url.removePrefix("http://")
+            url.startsWith("https://") -> url
+            url.startsWith("custom/") -> "https://c1.kgimg.com/" + if ("{size}" in template) url else url.replaceFirst("custom/", "custom/400/")
+            url.startsWith("stdmusic/") -> "https://imge.kugou.com/" + if ("{size}" in template) url else url.replaceFirst("stdmusic/", "stdmusic/400/")
+            url.startsWith("soft/collection/") -> "https://imge.kugou.com/" + if ("{size}" in template) url else url.replaceFirst("soft/collection/", "soft/collection/400/")
+            else -> ""
+        }
+    }
+
+    private fun playlistCover(o: JsonObject): String =
+        sequenceOf("flexible_cover", "pic", "imgurl", "cover", "img", "sizable_cover")
+            .map { coverUrl(o.text(it)) }.firstOrNull { it.isNotEmpty() }
+            ?: coverUrl(o.get("trans_param")?.takeIf { it.isJsonObject }?.asJsonObject?.text("union_cover").orEmpty())
+
+    private fun playlistAddedAt(o: JsonObject): Long =
+        sequenceOf("collecttime", "addtime", "add_time", "create_time")
+            .mapNotNull { o.text(it).toLongOrNull()?.takeIf { n -> n > 0 } }
+            .map { if (it < 100_000_000_000L) it * 1000 else it }.firstOrNull() ?: 0L
 
     internal fun parsePlaylistTrack(o: JsonObject): NeteaseTrack? {
         val hash = o.text("hash")
@@ -277,10 +317,54 @@ abstract class BaseKugouApi {
         return result
     }
 
+    /** 首页使用专用推荐接口，一批读取 30 个歌单；旧首页接口作为失败回退。 */
+    fun recommendPlaylists(): List<NeteasePlaylist> {
+        val recommended = runCatching {
+            val now = System.currentTimeMillis() / 1000
+            val body = JsonObject().apply {
+                addProperty("appid", appid)
+                addProperty("mid", "1")
+                addProperty("clientver", clientver)
+                addProperty("platform", "android")
+                addProperty("clienttime", now)
+                addProperty("userid", 0)
+                addProperty("module_id", 1)
+                addProperty("page", 1)
+                addProperty("pagesize", 30)
+                addProperty("key", md5("$appid$salt$clientver$now"))
+                add("special_recommend", JsonObject().apply {
+                    addProperty("withtag", 1)
+                    addProperty("withsong", 0)
+                    addProperty("sort", 1)
+                    addProperty("ugc", 1)
+                    addProperty("is_selected", 0)
+                    addProperty("withrecommend", 1)
+                    addProperty("area_code", 1)
+                    addProperty("categoryid", 0)
+                })
+                addProperty("req_multi", 1)
+                addProperty("retrun_min", 5)
+                addProperty("return_special_falg", 1)
+            }.toString()
+            val response = post(buildSignedRequest("/v2/special_recommend", body, 0, "", "specialrec.service.kugou.com"))
+            parseRecommendations(parsePage(response).getAsJsonArray("special_list"))
+        }.getOrDefault(emptyList())
+        return recommended.ifEmpty { legacyRecommendPlaylists() }
+    }
+
+    private fun parseRecommendations(items: com.google.gson.JsonArray?): List<NeteasePlaylist> =
+        items?.mapNotNull { el ->
+            if (!el.isJsonObject) return@mapNotNull null
+            val o = el.asJsonObject
+            val id = o.text("specialid").toLongOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+            NeteasePlaylist(id, o.text("specialname"), o.text("songcount").toIntOrNull() ?: 0,
+                playlistCover(o), owned = false, platform = trackPlatform, kind = PlaylistKind.SPECIAL)
+        }?.distinctBy { it.cacheKey } ?: emptyList()
+
     /**
      * 获取每日推荐歌单列表
      */
-    fun recommendPlaylists(): List<NeteasePlaylist> {
+    private fun legacyRecommendPlaylists(): List<NeteasePlaylist> {
         val clienttime = (System.currentTimeMillis() / 1000).toString()
 
         val params = linkedMapOf(
@@ -305,25 +389,10 @@ abstract class BaseKugouApi {
             )
         ) ?: return emptyList()
 
-        val result = mutableListOf<NeteasePlaylist>()
-        try {
-            val root = JsonParser().parse(jsonStr).asJsonObject
-            val info = root.getAsJsonObject("data")?.getAsJsonObject("info")
-            val special = info?.getAsJsonArray("special") ?: return emptyList()
-            for (el in special) {
-                if (!el.isJsonObject) continue
-                val o = el.asJsonObject
-                val id = o.get("specialid")?.asLong ?: continue
-                val name = o.get("specialname")?.asString ?: "酷狗歌单"
-                val count = o.get("songcount")?.asInt ?: 0
-                val coverTpl = o.get("imgurl")?.asString ?: ""
-                val cover = coverUrl(coverTpl)
-                result += NeteasePlaylist(id, name, count, cover, owned = false, platform = trackPlatform, kind = PlaylistKind.SPECIAL)
-            }
-        } catch (e: Exception) {
-            DangoLogger.warn("Kugou recommend playlists parse failed: {}", e.toString())
-        }
-        return result
+        return try {
+            val info = parsePage(jsonStr).getAsJsonObject("info")
+            parseRecommendations(info?.getAsJsonArray("special"))
+        } catch (_: Exception) { emptyList() }
     }
 
     /**
