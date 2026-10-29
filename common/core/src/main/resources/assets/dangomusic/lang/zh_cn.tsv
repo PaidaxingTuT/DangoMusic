@@ -287,3 +287,36 @@ Copy download link	复制下载链接
 Dango Music update: 	Dango Music 有新版本：
 Copy the download link in the player's settings	可在播放器设置里复制下载链接
 Loaded %d of %d songs	已加载 %d / %d 首
+You are the host · everyone in the room can pick songs and control playback	你是房主，房间里的人都能切歌和控制播放
+ · you can pick songs and control playback too	，你也能切歌和控制播放
+ · the host turned off member control	，房主关闭了成员控制
+ · the host's mod is older, only the host can control playback	，房主的版本较旧，只能由房主控制
+Let members control playback	允许成员切歌和控制播放
+Members can't control playback: the Firebase database rules need updating	成员控制被数据库拒绝了，请房间所在的 Firebase 更新数据库规则
+Translation	歌词翻译
+Show the translation under each lyric line when the song has one	歌曲有翻译时，在每句歌词下面显示翻译
+Translation animation	翻译出场动画
+The translation appears character by character like the lyrics	翻译像歌词一样逐字出现
+Translation wiggle	翻译抖动
+The translation wiggles like the lyrics (uses the Wiggle speed and amount)	翻译也像歌词一样抖动（用抖动的速度和幅度）
+Lyric color	歌词颜色
+Color of the 3D lyrics	3D 歌词的文字颜色
+Translation color	翻译颜色
+Color of the translation	翻译的文字颜色
+Under each line	原文下方
+Dance	跳舞
+Mobs on the beat	生物跟着节奏
+Mob dance	生物跟着摇
+Every creature in the world squashes and stretches on the beat of the song	世界里所有生物踩着歌曲的节拍压扁再拉长
+Spin	转圈
+Creatures also spin around steadily	生物同时匀速转圈
+Dance amount	摇的幅度
+How much creatures squash and stretch	压扁拉长得多厉害
+Beat offset	踩点偏移
+Move the bounce earlier or later if it doesn't land on the beat	没踩在点上时，把弹的时刻往前或往后挪
+Auto BPM	自动测 BPM
+Work out the song's BPM from its drum beats	从歌里的鼓点自动算出 BPM
+Tap BPM	自己点 BPM
+Left-click 16 times on the beat to set the BPM yourself; counting starts with your first click (recommended, most accurate)	跟着节拍左键点 16 下自己定 BPM，点第一下才开始算（最推荐，最准）
+Night glow only	只在晚上发光
+Turn glow off in daylight and back on when it gets dark	白天关掉发光，天黑了自动打开

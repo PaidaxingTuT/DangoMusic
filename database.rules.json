@@ -1,0 +1,67 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('host').val() === auth.uid || data.child('members').child(data.child('host').val()).child('lastSeen').val() < now - 600000)",
+        ".validate": "$code.length <= 16 && newData.hasChildren(['host']) && (newData.child('host').val() === auth.uid || newData.child('host').val() === data.child('host').val())",
+        "host": { ".validate": "newData.isString() && newData.val().length <= 128" },
+        "hostName": { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "protocol": { ".validate": "newData.isNumber()" },
+        "memberControl": { ".validate": "newData.isBoolean()" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('rooms').child($code).exists()",
+            ".validate": "$uid.length <= 128 && newData.hasChildren(['lastSeen'])",
+            "name": { ".validate": "newData.isString() && newData.val().length <= 64" },
+            "lastSeen": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "state": {
+          "trackId": { ".validate": "newData.isNumber()" },
+          "source": { ".validate": "newData.isString() && newData.val().length <= 16" },
+          "nativeId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "mediaId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "albumId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "name": { ".validate": "newData.isString() && newData.val().length <= 1024" },
+          "artists": { ".validate": "newData.isString() && newData.val().length <= 2048" },
+          "cover": { ".validate": "newData.isString() && newData.val().length <= 4096" },
+          "duration": { ".validate": "newData.isNumber()" },
+          "pos": { ".validate": "newData.isNumber()" },
+          "playing": { ".validate": "newData.isBoolean()" },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        },
+        "req": {
+          ".write": "auth != null && data.parent().child('members').child(auth.uid).exists() && data.parent().child('memberControl').val() === true",
+          "id": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "by": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+          "byName": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "op": { ".validate": "newData.isString() && newData.val().length <= 16" },
+          "trackId": { ".validate": "newData.isNumber()" },
+          "source": { ".validate": "newData.isString() && newData.val().length <= 16" },
+          "nativeId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "mediaId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "albumId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "name": { ".validate": "newData.isString() && newData.val().length <= 1024" },
+          "artists": { ".validate": "newData.isString() && newData.val().length <= 2048" },
+          "cover": { ".validate": "newData.isString() && newData.val().length <= 4096" },
+          "duration": { ".validate": "newData.isNumber()" },
+          "pos": { ".validate": "newData.isNumber()" },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+    "clock": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+        ".validate": "newData.isNumber()"
+      }
+    }
+  }
+}

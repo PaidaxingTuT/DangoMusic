@@ -88,14 +88,22 @@ object QqMusicSource : MusicSourceApi {
         try {
             val data = cgi("music.musichallSong.PlayLyricInfo", "GetPlayLyricInfo", JsonObject().apply {
                 addProperty("songMid", track.nativeId); addProperty("type", 1)
-                for (key in listOf("lrc_t", "qrc_t", "roma", "roma_t", "trans", "trans_t")) addProperty(key, 0)
+                for (key in listOf("lrc_t", "qrc_t", "roma", "roma_t", "trans_t")) addProperty(key, 0)
+                addProperty("trans", 1)
                 addProperty("crypt", 1); addProperty("qrc", 1)
             })
             val lines = QqLyrics.decode(data.text("lyric"))
-            if (lines.isNotEmpty()) return Lyrics(lines, source.label)
+            if (lines.isNotEmpty()) return Lyrics(LyricsProvider.withTranslation(lines, translation(data.text("trans"))), source.label)
         } catch (_: Exception) { /* Songs without QRC still use the ordinary line-timed lyric endpoint. */ }
         val root = json("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?format=json&nobase64=1&songmid=${SourceHttp.enc(track.nativeId)}")
         val lines = LyricsProvider.parseLrc(root.text("lyric"))
-        return if (lines.isEmpty()) null else Lyrics(lines, source.label)
+        return if (lines.isEmpty()) null else Lyrics(LyricsProvider.withTranslation(lines, translation(root.text("trans"))), source.label)
+    }
+
+    /** QQ 的翻译是普通 LRC（PlayLyricInfo 里和 QRC 一样加了密），解不出来就当没有 */
+    private fun translation(value: String): List<me.sorihiko.dango.lyrics.LyricLine> = try {
+        if (value.isBlank()) emptyList() else LyricsProvider.parseLrc(QqLyrics.plaintext(value))
+    } catch (_: Exception) {
+        emptyList()
     }
 }

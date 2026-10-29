@@ -78,6 +78,11 @@ object MusicPlayer {
 
     private fun clearBeats() = synchronized(beats) { beats.clear() }
 
+    /** 最近检测到的鼓点：[0] 时间（歌曲内 ms），[1] 强度 0..1，从早到晚 */
+    fun beatSnapshot(): Array<FloatArray> = synchronized(beats) {
+        Array(beats.size) { val b = beats.elementAt(it); floatArrayOf(b.timeMs.toFloat(), b.strength) }
+    }
+
     val positionMs: Long
         get() = when (state) {
             State.PLAYING -> seekBaseMs + (line?.microsecondPosition ?: 0L) / 1000
@@ -89,7 +94,14 @@ object MusicPlayer {
 
     // ---------------------------------------------------------------- 队列控制
 
+    private val party get() = me.sorihiko.dango.party.ListenParty
+
     fun playQueue(tracks: List<NeteaseTrack>, startIndex: Int) {
+        // 一起听的成员：交给房主去放
+        if (party.canControl) {
+            if (tracks.isNotEmpty()) party.requestPlay(tracks[Math.floorMod(startIndex, tracks.size)])
+            return
+        }
         if (tracks.isNotEmpty() && !canPlay(tracks[Math.floorMod(startIndex, tracks.size)])) return
         queue = tracks
         playIndex(startIndex)
@@ -100,6 +112,7 @@ object MusicPlayer {
         if (q.isEmpty()) return
         val idx = ((i % q.size) + q.size) % q.size
         val track = q[idx]
+        if (party.canControl) return party.requestPlay(track)
         if (!canPlay(track)) return
         index = idx
         val gen = ++generation
@@ -137,6 +150,18 @@ object MusicPlayer {
         loader.execute { load(gen, track, startAt, paused) }
     }
 
+    /** 一起听：房主放成员点的歌，插在当前这首后面，放完接着原来的队列 */
+    fun playNext(track: NeteaseTrack) {
+        val q = queue
+        if (q.isEmpty() || index !in q.indices) {
+            queue = listOf(track)
+            playIndex(0)
+            return
+        }
+        queue = q.subList(0, index + 1) + track + q.subList(index + 1, q.size)
+        playIndex(index + 1)
+    }
+
     /** 一起听：跳到 ms 并设成播放 / 暂停（当前这首已经下载好时用） */
     fun syncTo(ms: Long, play: Boolean) {
         val bytes = audio ?: return
@@ -149,12 +174,14 @@ object MusicPlayer {
     }
 
     fun next() {
+        if (party.canControl) return party.requestNext()
         val q = queue
         if (q.isEmpty()) return
         playIndex(if (shuffle && q.size > 1) pickRandom(q.size) else index + 1)
     }
 
     fun prev() {
+        if (party.canControl) return party.requestPrev()
         if (positionMs > 3000) {
             seek(0)
             return
@@ -169,6 +196,11 @@ object MusicPlayer {
     }
 
     fun togglePause() {
+        // 一起听的成员：本地先生效，再告诉房主
+        if (party.canControl && (state == State.PLAYING || state == State.PAUSED)) {
+            party.requestState(if (state == State.PLAYING) me.sorihiko.dango.party.PartyRequest.PAUSE
+                else me.sorihiko.dango.party.PartyRequest.RESUME, positionMs)
+        }
         when (state) {
             State.PLAYING -> {
                 pausedAtMs = positionMs
@@ -182,7 +214,7 @@ object MusicPlayer {
                     state = State.PLAYING
                     l.start()
                 } else {
-                    seek(pausedAtMs)
+                    seekLocal(pausedAtMs)
                 }
             }
             else -> {}
@@ -190,6 +222,12 @@ object MusicPlayer {
     }
 
     fun seek(ms: Long) {
+        if (audio == null) return
+        if (party.canControl) party.requestState(me.sorihiko.dango.party.PartyRequest.SEEK, ms.coerceIn(0L, max(0L, durationMs - 500)))
+        seekLocal(ms)
+    }
+
+    private fun seekLocal(ms: Long) {
         val bytes = audio ?: return
         val target = ms.coerceIn(0L, max(0L, durationMs - 500))
         // 暂停时拖动：停在新位置，仍保持暂停

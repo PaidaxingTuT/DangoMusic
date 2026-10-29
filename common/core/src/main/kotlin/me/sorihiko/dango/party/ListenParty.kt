@@ -17,9 +17,12 @@ import kotlin.math.abs
  * 一起听歌（通过 [PartyTransport] 同步，默认是 Firebase 实时数据库）：
  *   房主：开房间 → 得到房间码；自己正常放歌，切歌 / 拖进度 / 暂停时把状态写到数据库
  *   成员：输入房间码加入 → 监听房间，自动放同一首歌、跳到同一位置、跟着暂停
+ *   成员控制：房主开着"允许成员控制"时，成员切歌 / 拖进度 / 暂停会写一条请求（[PartyRequest]），
+ *     房主的游戏自动执行（不用房主确认），再照常把新状态发给所有人。播放状态始终只有房主在写。
  * 每个人按歌曲音源从自己的账号取歌，只同步歌曲信息、进度和播放状态。
  *
- * 数据结构：rooms/{房间码} = { host, hostName, members/{uid} = {name, lastSeen}, state = {...} }
+ * 数据结构：rooms/{房间码} = { host, hostName, memberControl, members/{uid} = {name, lastSeen}, state = {...}, req = {...} }
+ * 旧版房主开的房间没有 memberControl，成员只能跟着放；旧版成员不认识 req，照样能加入、跟着放。
  * 每人只开一条监听，推下来的增量直接合并进本地 [RoomMirror]，平时不再读数据库。
  */
 object ListenParty {
@@ -52,6 +55,11 @@ object ListenParty {
         private set
     @Volatile var members: List<Member> = emptyList()
         private set
+    /** 房间是否允许成员控制；旧版房主开的房间没有这一项，算 null */
+    @Volatile var memberControl: Boolean? = null
+        private set
+    /** 成员现在能不能控制播放 */
+    val canControl: Boolean get() = role == Role.MEMBER && memberControl == true
     /** 给界面看的状态 / 错误信息 */
     @Volatile var status = ""
         private set
@@ -76,8 +84,11 @@ object ListenParty {
     private var sentAt = 0L
     // 成员：已经请求加载的歌、上次纠正的时间
     @Volatile private var requestedKey = ""
-    private var lastCorrection = 0L
+    @Volatile private var lastCorrection = 0L
     private var lastHeartbeat = 0L
+    // 房主：最后处理过的成员请求；还没执行的请求
+    private var lastReqId = ""
+    @Volatile private var pendingReq: PartyRequest? = null
 
     init {
         Thread({
@@ -149,6 +160,7 @@ object ListenParty {
                         addProperty("protocol", 3)
                         addProperty("host", net.uid)
                         addProperty("hostName", myName())
+                        addProperty("memberControl", true)
                         add("createdAt", sv())
                         add("members", JsonObject().apply {
                             add(net.uid, JsonObject().apply {
@@ -165,6 +177,9 @@ object ListenParty {
                         role = Role.HOST
                         roomProtocol = 3
                         sentKey = ""
+                        memberControl = true
+                        lastReqId = ""
+                        pendingReq = null
                         lastHeartbeat = System.currentTimeMillis()
                         startListening()
                         status = ""
@@ -245,6 +260,8 @@ object ListenParty {
         hostName = ""
         members = emptyList()
         remote = null
+        memberControl = null
+        pendingReq = null
         roomProtocol = 1
         requestedKey = ""
         MusicPlayer.followMode = false
@@ -254,6 +271,54 @@ object ListenParty {
     fun resync() {
         requestedKey = ""
         lastCorrection = 0L
+    }
+
+    /** 房主：打开 / 关闭"允许成员控制" */
+    fun setMemberControl(on: Boolean) {
+        if (role != Role.HOST) return
+        val c = code
+        memberControl = on
+        worker.execute {
+            if (transport.patch("rooms/$c", JsonObject().apply { addProperty("memberControl", on) }) == null && code == c) {
+                status = connectError(transport, "设置失败（" + transport.lastStatus + "）")
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- 成员：把操作交给房主
+
+    /** 成员点了一首歌：本地先开始加载（快一点），同时请房主切过去 */
+    fun requestPlay(track: NeteaseTrack) {
+        if (!canControl || !supportsSource(track.source)) return
+        requestedKey = track.key
+        MusicPlayer.playTrackAt(track, { 0L }, false)
+        lastCorrection = System.currentTimeMillis() + 4000
+        sendRequest(PartyRequest.PLAY, 0L, track)
+    }
+
+    fun requestNext() = sendRequest(PartyRequest.NEXT, 0L, null)
+
+    fun requestPrev() = sendRequest(PartyRequest.PREV, MusicPlayer.positionMs, null)
+
+    /** 拖进度 / 暂停 / 继续：本地已经先生效了，这里只是告诉房主，并在房主的新状态到之前先别把自己拉回去 */
+    fun requestState(op: String, pos: Long) {
+        lastCorrection = System.currentTimeMillis() + 2500
+        sendRequest(op, pos, null)
+    }
+
+    private fun sendRequest(op: String, pos: Long, track: NeteaseTrack?) {
+        if (!canControl) return
+        val c = code
+        worker.execute {
+            val net = transport
+            val r = PartyRequest(newCode(), net.uid, myName(), op, pos, 0L, track)
+            if (net.put("rooms/$c/req", PartyRequest.write(r, sv())) == null && code == c) {
+                // 401 / 403：数据库规则里还没有 req 这一条
+                status = if (net.lastStatus == 401 || net.lastStatus == 403) "成员控制被数据库拒绝了，请房间所在的 Firebase 更新数据库规则"
+                    else connectError(net, "操作没发出去（" + net.lastStatus + "）")
+                resync()
+            }
+        }
     }
 
     /** 连不上时告诉玩家卡在哪：登录服务、数据库还是代理；服务器拒绝等其他情况用 [fallback] */
@@ -318,6 +383,7 @@ object ListenParty {
     private fun apply(room: JsonObject) {
         hostUid = room.get("host")?.asString ?: ""
         hostName = room.get("hostName")?.asString ?: ""
+        memberControl = room.get("memberControl")?.takeIf { it.isJsonPrimitive }?.asBoolean
         val now = transport.serverNow()
         members = (room.get("members") as? JsonObject)?.entrySet()?.mapNotNull { (uid, v) ->
             val o = v as? JsonObject ?: return@mapNotNull null
@@ -337,6 +403,17 @@ object ListenParty {
         } catch (_: Exception) {
             null
         }
+
+        if (role == Role.HOST) {
+            val r = PartyRequest.read(room.get("req") as? JsonObject)
+            if (PartyRequest.accept(r, lastReqId, hostUid, members.map { it.uid }, memberControl == true, now)) {
+                lastReqId = r!!.id
+                pendingReq = r
+            } else if (r != null && lastReqId.isEmpty()) {
+                // 刚开房 / 刚收到第一条快照时留着的旧请求：记下来，不执行
+                lastReqId = r.id
+            }
+        }
     }
 
     private fun heartbeat() {
@@ -350,6 +427,10 @@ object ListenParty {
     // ---------------------------------------------------------------- 房主：把自己的播放状态发出去
 
     private fun hostTick() {
+        pendingReq?.let {
+            pendingReq = null
+            runRequest(it)
+        }
         val cur = MusicPlayer.current ?: return
         if (!supportsSource(cur.source)) return
         val st = MusicPlayer.state
@@ -364,6 +445,33 @@ object ListenParty {
         val predicted = sentPos + if (sentPlaying) now - sentAt else 0L
         val changed = cur.key != sentKey || playing != sentPlaying || abs(pos - predicted) > 1500 || now - sentAt > STATE_REFRESH_MS
         if (changed) send(cur, pos, playing)
+    }
+
+    /** 房主执行成员的请求（不用确认），执行完 [hostTick] 会照常把新状态发出去 */
+    private fun runRequest(r: PartyRequest) {
+        DangoLogger.info("Listen Together: member request {}", r.op)
+        when (r.op) {
+            PartyRequest.PLAY -> r.track?.let { if (supportsSource(it.source)) MusicPlayer.playNext(it) }
+            PartyRequest.NEXT -> MusicPlayer.next()
+            PartyRequest.PREV -> MusicPlayer.prev()
+            PartyRequest.SEEK, PartyRequest.PAUSE, PartyRequest.RESUME -> {
+                val st = MusicPlayer.state
+                if (st != MusicPlayer.State.PLAYING && st != MusicPlayer.State.PAUSED) return
+                val play = if (r.op == PartyRequest.SEEK) st == MusicPlayer.State.PLAYING else r.op == PartyRequest.RESUME
+                // 请求在路上花的时间补上：成员那边一直在放的话，现在应该已经放到后面了
+                val travel = if (r.op != PartyRequest.PAUSE && play) (transport.serverNow() - r.at).coerceIn(0L, 5000L) else 0L
+                val target = r.pos + travel
+                val here = MusicPlayer.positionMs
+                if (r.op != PartyRequest.SEEK && abs(here - target) < 1500) {
+                    if ((st == MusicPlayer.State.PLAYING) != play) MusicPlayer.togglePause()
+                } else {
+                    MusicPlayer.syncTo(target, play)
+                }
+            }
+        }
+        // 马上把新状态发出去，不等进度差够大
+        sentAt = 0L
+        sentKey = ""
     }
 
     private fun send(t: NeteaseTrack, pos: Long, playing: Boolean) {

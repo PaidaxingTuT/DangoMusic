@@ -36,8 +36,13 @@ internal class PartyPage(private val screen: MusicScreen) {
         ui.text(I18n.text("Listen Together"), x, y, 22f, Theme.TEXT_PRIMARY, Theme.FONT_DISPLAY)
         val sub = when (role) {
             ListenParty.Role.NONE -> I18n.text("Play the same song in sync with friends who also have this mod")
-            ListenParty.Role.HOST -> I18n.text("You are the host · everyone in the room follows your music")
-            ListenParty.Role.MEMBER -> I18n.text("Following ") + ListenParty.hostName
+            ListenParty.Role.HOST -> if (ListenParty.memberControl == true) I18n.text("You are the host · everyone in the room can pick songs and control playback")
+                else I18n.text("You are the host · everyone in the room follows your music")
+            ListenParty.Role.MEMBER -> I18n.text("Following ") + ListenParty.hostName + when (ListenParty.memberControl) {
+                true -> I18n.text(" · you can pick songs and control playback too")
+                false -> I18n.text(" · the host turned off member control")
+                null -> I18n.text(" · the host's mod is older, only the host can control playback")
+            }
         }
         ui.text(sub, x, y + 30f, 11f, Theme.TEXT_SECONDARY, Theme.FONT_SEMIBOLD)
         y += 66f
@@ -111,6 +116,14 @@ internal class PartyPage(private val screen: MusicScreen) {
                 ui.pill(LayoutBounds(x + 150f, y, 120f, 34f), Color(1f, 1f, 1f, 0.12f), I18n.text("Resync"), "↻") { ListenParty.resync() }
             }
             y += 50f
+            if (role == ListenParty.Role.HOST) {
+                // 允许成员切歌 / 拖进度 / 暂停（房主不用确认，自动执行）
+                val on = ListenParty.memberControl == true
+                val sw = LayoutBounds(x, y, 40f, 22f)
+                ui.toggleSwitch(sw, on, area, "party.memberControl") { ListenParty.setMemberControl(!on) }
+                ui.text(I18n.text("Let members control playback"), sw.right + 12f, y + 5f, 12f, Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
+                y += 36f
+            }
         }
 
         val st = I18n.message(ListenParty.status)
