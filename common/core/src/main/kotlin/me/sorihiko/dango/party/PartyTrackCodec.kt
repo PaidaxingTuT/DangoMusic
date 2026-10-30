@@ -9,6 +9,7 @@ internal object PartyTrackCodec {
         addProperty("trackId", if (track.source == MusicSource.NETEASE) track.id else 0L)
         addProperty("source", track.source.key); addProperty("nativeId", track.nativeId)
         addProperty("mediaId", track.mediaId); addProperty("albumId", track.albumId)
+        addProperty("albumAudioId", track.albumAudioId)
         addProperty("name", track.name); addProperty("artists", track.artists.joinToString(" / "))
         addProperty("cover", track.coverUrl); addProperty("duration", track.durationMs)
     }
@@ -16,18 +17,20 @@ internal object PartyTrackCodec {
         val key = data.text("source").ifEmpty { "netease" }
         val source = MusicSource.values().firstOrNull { it.key == key } ?: return null
         val nativeRaw = data.text("nativeId").ifEmpty { data.text("trackId") }
-        val native = if (source == MusicSource.KUGOU) nativeRaw.uppercase(java.util.Locale.ROOT) else nativeRaw
+        val native = if (source == MusicSource.KUGOU || source == MusicSource.KUGOU_CONCEPT) nativeRaw.uppercase(java.util.Locale.ROOT) else nativeRaw
         val id = when (source) {
             MusicSource.NETEASE -> native.toLongOrNull()?.takeIf { it > 0 } ?: return null
             MusicSource.QQ -> if (validMid(native)) MusicSources.stableId(source,native) else return null
-            MusicSource.KUGOU -> if (native.matches(Regex("[A-F0-9]{32}"))) MusicSources.stableId(source,native) else return null
+            MusicSource.KUGOU, MusicSource.KUGOU_CONCEPT -> if (native.matches(Regex("[A-F0-9]{32}"))) MusicSources.stableId(source,native) else return null
         }
         val media = data.text("mediaId").ifEmpty { native }
         val album = data.text("albumId")
+        val albumAudio = data.text("albumAudioId")
         if (source == MusicSource.QQ && (!validMid(media) || (album.isNotEmpty() && !validMid(album)))) return null
-        if (source == MusicSource.KUGOU && (!media.equals(native,true) || !album.matches(Regex("[0-9]{0,20}")))) return null
+        if ((source == MusicSource.KUGOU || source == MusicSource.KUGOU_CONCEPT) && (!media.equals(native,true) ||
+            !album.matches(Regex("[0-9]{0,20}")) || !albumAudio.matches(Regex("[0-9]{0,20}")))) return null
         return NeteaseTrack(id, data.text("name").take(1024), data.text("artists").take(2048).split(" / ").filter { it.isNotEmpty() },
-            data.number("duration").coerceIn(0,24*60*60*1000L), data.text("cover").take(4096), source,native,media,album)
+            data.number("duration").coerceIn(0,24*60*60*1000L), data.text("cover").take(4096), source,native,media,album,albumAudio)
     }
     private fun validMid(value: String) = value.matches(Regex("[A-Za-z0-9]{1,64}"))
 }

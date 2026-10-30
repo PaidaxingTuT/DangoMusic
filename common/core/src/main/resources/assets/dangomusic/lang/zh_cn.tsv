@@ -188,7 +188,8 @@ Failed to join room: %s	加入失败（%s）
 Reset	重置
 NetEase	网易云
 QQ Music	QQ 音乐
-Kugou	酷狗
+Kugou	酷狗音乐
+Kugou Concept	概念版
 Music source	音乐来源
 Select a music provider	选择音乐平台
 Guest beta	游客模式 · Beta
@@ -207,6 +208,7 @@ Log in to QQ Music	登录 QQ 音乐
 Log in to Kugou	登录酷狗
 Scan with the mobile QQ app	使用手机 QQ 扫码
 Scan with the Kugou Music app	使用酷狗音乐 App 扫码
+Scan with the Kugou Concept app	使用酷狗概念版 App 扫码
 Playlists coming later	个人歌单暂未开放
 Scan the QR code to use your account.	扫码登录后，使用自己的账号权限播放。
 Playback uses your account permissions.	当前播放使用你自己的账号权限。

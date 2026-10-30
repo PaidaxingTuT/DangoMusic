@@ -14,6 +14,7 @@ class NeteaseTrack @JvmOverloads constructor(
     val nativeId: String = id.toString(),
     val mediaId: String = nativeId,
     val albumId: String = "",
+    val albumAudioId: String = "",
 ) {
     val key: String get() = "${source.key}:$nativeId"
     companion object {
