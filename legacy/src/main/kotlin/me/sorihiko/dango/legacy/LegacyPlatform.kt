@@ -67,6 +67,40 @@ object LegacyPlatform : Platform {
 
     override val skyDarken: Int? get() = mc.theWorld?.skylightSubtracted
 
+    override val environment: me.sorihiko.dango.platform.ListenerEnvironment?
+        get() {
+            val p = mc.thePlayer ?: return null
+            val world = mc.theWorld ?: return null
+            val eyeY = p.posY + p.getEyeHeight()
+            val eye = net.minecraft.util.BlockPos(p.posX, eyeY, p.posZ)
+            // 闭塞程度：往 14 个方向各看 6 格，碰到实心方块（不算空气和液体）的比例
+            var hits = 0
+            val d = 0.57735
+            val dirs = arrayOf(
+                doubleArrayOf(1.0, 0.0, 0.0), doubleArrayOf(-1.0, 0.0, 0.0), doubleArrayOf(0.0, 1.0, 0.0),
+                doubleArrayOf(0.0, -1.0, 0.0), doubleArrayOf(0.0, 0.0, 1.0), doubleArrayOf(0.0, 0.0, -1.0),
+                doubleArrayOf(d, d, d), doubleArrayOf(d, d, -d), doubleArrayOf(-d, d, d), doubleArrayOf(-d, d, -d),
+                doubleArrayOf(d, -d, d), doubleArrayOf(d, -d, -d), doubleArrayOf(-d, -d, d), doubleArrayOf(-d, -d, -d),
+            )
+            for (dir in dirs) {
+                for (step in 1..6) {
+                    val pos = net.minecraft.util.BlockPos(p.posX + dir[0] * step, eyeY + dir[1] * step, p.posZ + dir[2] * step)
+                    val block = world.getBlockState(pos).block
+                    if (!world.isAirBlock(pos) && !block.material.isLiquid) {
+                        hits++
+                        break
+                    }
+                }
+            }
+            val rain = when {
+                !world.isRainingAt(eye) -> 0f
+                world.isThundering -> 1f
+                else -> 0.5f
+            }
+            return me.sorihiko.dango.platform.ListenerEnvironment(
+                p.isInsideOfMaterial(net.minecraft.block.material.Material.water), world.canSeeSky(eye), hits / dirs.size.toFloat(), rain)
+        }
+
     override val player: PlayerPose?
         get() {
             val p = mc.thePlayer ?: return null

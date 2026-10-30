@@ -12,6 +12,7 @@ import me.sorihiko.dango.module.values.BooleanValue
 import me.sorihiko.dango.module.values.FloatValue
 import me.sorihiko.dango.module.values.IntValue
 import me.sorihiko.dango.module.values.ModuleValue
+import me.sorihiko.dango.music.EnvironmentAudio
 import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.NeteaseApi
 import me.sorihiko.dango.music.MusicSources
@@ -80,6 +81,27 @@ class NeteaseMusicModule : Module() {
 
     @ModuleValue("Toggle lyrics", "Hotkey to turn lyrics on or off")
     private val keyLyrics = IntValue(-100, 255, 0)
+
+    @ModuleValue("Volume normalization", "Keep songs at a similar loudness")
+    private val normalize = BooleanValue(true)
+
+    @ModuleValue("Environment audio", "Music changes with where you are")
+    private val envAudio = BooleanValue(true)
+
+    @ModuleValue("Underwater", "Muffled while your head is underwater")
+    private val envWater = BooleanValue(true)
+
+    @ModuleValue("Cave echo", "Echo in enclosed places with no sky above")
+    private val envCave = BooleanValue(true)
+
+    @ModuleValue("Indoors", "Slightly muffled, with some room echo, under a roof")
+    private val envIndoor = BooleanValue(true)
+
+    @ModuleValue("Rain", "A little quieter in rain and thunder")
+    private val envRain = BooleanValue(true)
+
+    @ModuleValue("Effect strength", "How strong the environment effects are")
+    private val envStrength = FloatValue(0f, 1f, 1f, 2)
 
     @ModuleValue("Check for updates", "Look for a newer release on GitHub once per launch and remind you")
     val checkUpdates = BooleanValue(true)
@@ -173,6 +195,17 @@ class NeteaseMusicModule : Module() {
         MusicPlayer.shuffle = shuffle.get()
 
         MusicPlayer.repeatOne = repeatOne.get()
+
+        MusicPlayer.normalize = normalize.get()
+
+        // 环境音效：设置和玩家周围的环境交给解码线程
+        EnvironmentAudio.enabled = envAudio.get()
+        EnvironmentAudio.water = envWater.get()
+        EnvironmentAudio.cave = envCave.get()
+        EnvironmentAudio.indoor = envIndoor.get()
+        EnvironmentAudio.rain = envRain.get()
+        EnvironmentAudio.strength = envStrength.value
+        EnvironmentAudio.update(try { DangoMusic.instance.platform.environment } catch (_: Exception) { null })
 
         // 打开键额外支持主菜单；其他播放快捷键仍只在世界内响应。
         val platform = DangoMusic.instance.platform

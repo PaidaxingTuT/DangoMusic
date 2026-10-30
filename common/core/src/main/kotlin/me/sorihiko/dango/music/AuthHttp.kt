@@ -23,7 +23,7 @@ internal object AuthHttp {
 
     fun allowed(source: MusicSource, host: String?): Boolean = when (source) {
         MusicSource.QQ -> host in setOf("xui.ptlogin2.qq.com", "ssl.ptlogin2.qq.com", "graph.qq.com", "y.qq.com", "u.y.qq.com", "szu.y.qq.com", "shu.y.qq.com", "c.y.qq.com")
-        MusicSource.KUGOU -> host in setOf("login-user.kugou.com", "loginservice.kugou.com", "wwwapi.kugou.com", "wwwapiretry.kugou.com", "www.kugou.com", "gateway.kugou.com")
+        MusicSource.KUGOU -> host in setOf("login-user.kugou.com", "loginservice.kugou.com", "wwwapi.kugou.com", "wwwapiretry.kugou.com", "www.kugou.com", "gateway.kugou.com", "kugouvip.kugou.com")
         else -> false
     }
 

@@ -137,7 +137,12 @@ internal object Library {
                 request.api.search(q).also {
                     if (request.api.source == MusicSource.NETEASE) error = NeteaseApi.lastSearchError
                 }
-            } catch (_: Exception) { error = "Source unavailable. Please retry."; emptyList() }
+            } catch (e: Exception) {
+                // 记下真正的原因（以前直接吞掉，日志里什么都看不到）
+                me.sorihiko.dango.DangoLogger.warn("{} search failed: {}", request.api.source.key, e.toString())
+                error = publicError(e)
+                emptyList()
+            }
             publish(request) {
                 if (serial == searchSerial) { searchResults = result; searchError = error; searching = false }
             }
@@ -171,5 +176,28 @@ internal object Library {
     }
 
     fun showStatus(message: String) { status = message }
+
+    // 网易云红心：列表在后台拉，点了在后台改
+    @Volatile private var likedCheckedAt = 0L
+    @Volatile var liking = false
+        private set
+
+    fun ensureLiked() {
+        val now = System.currentTimeMillis()
+        if (now - likedCheckedAt < 30_000L || !NeteaseApi.loggedIn) return
+        likedCheckedAt = now
+        worker.execute { try { NeteaseApi.loadLiked() } catch (_: Exception) { } }
+    }
+
+    fun toggleLike(track: NeteaseTrack) {
+        if (liking || track.source != MusicSource.NETEASE) return
+        liking = true
+        val like = !NeteaseApi.isLiked(track.id)
+        worker.execute {
+            val ok = try { NeteaseApi.setLiked(track.id, like) } catch (_: Exception) { false }
+            liking = false
+            if (!ok) status = if (like) "Could not add to Liked songs. Please retry." else "Could not remove from Liked songs. Please retry."
+        }
+    }
     private fun publicError(error: Exception) = if (error is SourceAccessException) error.message.orEmpty() else "Source unavailable. Please retry."
 }

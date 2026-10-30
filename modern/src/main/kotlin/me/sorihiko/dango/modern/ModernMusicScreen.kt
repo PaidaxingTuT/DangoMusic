@@ -25,6 +25,7 @@ class ModernMusicScreen(
 
     override fun onRender() {
         screen.render(McCompat.renderMenuBackdrop(parent))
+        setImeFocus(screen.textInputActive)
     }
 
     override fun onMouseClicked(button: Int) {

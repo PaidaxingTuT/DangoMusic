@@ -255,7 +255,9 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         val nowPlaying = Group("Now playing", "Classic overlay", ly.m, false, ly.take(listOf("nowPlaying", "showCover")))
         ly.take().let { if (it.isNotEmpty()) lyrics += Group("Other", "More", ly.m, false, it) }
 
-        val player = Src(module, fmts = mapOf("volume" to ::percent))
+        val player = Src(module,
+            deps = mapOf("envWater" to "envAudio", "envCave" to "envAudio", "envIndoor" to "envAudio", "envRain" to "envAudio", "envStrength" to "envAudio"),
+            fmts = mapOf("volume" to ::percent, "envStrength" to ::percent))
         player.left.remove("shuffle")   // 随机播放用播放栏上的按钮就够了，设置页不再显示（状态照样保存）
         player.left.remove("repeatOne") // 单曲循环同样通过播放栏控制
         player.left.remove("musicSource") // 音源通过侧栏切换。
@@ -263,8 +265,10 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         val island = Src(mm.get(DynamicIslandModule::class.java), fmts = mapOf("notifyTime" to { v: Any -> "%.1f s".format((v as FloatValue).value) }))
         // 先取走，免得落进下面的 Hotkeys 组
         val updates = player.take(listOf("checkUpdates"))
+        val environment = player.take(listOf("envAudio", "envWater", "envCave", "envIndoor", "envRain", "envStrength"))
         val music = listOf(
-            Group("Player", "Playback", player.m, false, player.take(listOf("volume", "language"))),
+            Group("Player", "Playback", player.m, false, player.take(listOf("volume", "normalize", "language"))),
+            Group("Environment audio", "Sound around you", player.m, false, environment),
             Group("Hotkeys", "Click, then press a key · Backspace clears", player.m, false, player.take()),
             Group("Song card", "Overlay", card.m, true, card.take()),
             nowPlaying,
