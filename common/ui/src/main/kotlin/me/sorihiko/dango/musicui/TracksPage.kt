@@ -6,6 +6,8 @@ import me.sorihiko.dango.DangoClient
 import me.sorihiko.dango.music.CoverCache
 import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.MusicScreen
+import me.sorihiko.dango.music.MusicSource
+import me.sorihiko.dango.music.MusicSources
 import me.sorihiko.dango.music.NeteaseApi
 import me.sorihiko.dango.music.NeteaseTrack
 import me.sorihiko.dango.platform.Keys
@@ -98,7 +100,8 @@ internal class TracksPage(private val screen: MusicScreen) {
         Page.QUEUE -> I18n.text("Now Playing") to MusicPlayer.queue
         Page.PLAYLIST -> {
             val p = ScreenState.opened
-            (p?.name ?: "") to (if (p != null) Library.tracks(p.id) else null)
+            // 私人 FM 正在放时显示真正的队列（放着放着会接上新歌）
+            (p?.name ?: "") to (if (p == null) null else if (p.id == NeteaseApi.FM_ID && MusicPlayer.radio != null) MusicPlayer.queue else Library.tracks(p.id))
         }
         else -> "" to null
     }
@@ -128,8 +131,13 @@ internal class TracksPage(private val screen: MusicScreen) {
 
     /** 播放：队列始终是完整歌单（筛选只影响显示），从点的那首开始 */
     private fun playFrom(all: List<NeteaseTrack>, index: Int) {
-        if (ScreenState.page == Page.QUEUE) MusicPlayer.playIndex(index) else MusicPlayer.playQueue(all, index)
+        if (ScreenState.page == Page.QUEUE) MusicPlayer.playIndex(index) else MusicPlayer.playQueue(all, index, radio())
     }
+
+    /** 私人 FM 的页面：放完接着要新的歌 */
+    private fun radio(): (() -> List<NeteaseTrack>)? =
+        if (ScreenState.page == Page.PLAYLIST && ScreenState.opened?.id == NeteaseApi.FM_ID && MusicSources.selected == MusicSource.NETEASE)
+            NeteaseApi::personalFm else null
 
     /** 跳到正在播放的那首：列表滚到它居中，封面墙转到它，并闪一下 */
     private fun locateCurrent() {
@@ -290,7 +298,7 @@ internal class TracksPage(private val screen: MusicScreen) {
             ctx.drawShape(pb, ShapeStyle(if (ui.hover(pb)) RED.copy(a = 0.85f) else RED, 15f))
             ui.icon("▶", pb.x + 17f, pb.y + 15f, 11f, Theme.TEXT_PRIMARY)
             ui.text(label, pb.x + 30f, pb.y + 9f, 12f, Theme.TEXT_PRIMARY, Theme.FONT_SEMIBOLD)
-            ui.hits += pb to { MusicPlayer.playQueue(tracks, if (MusicPlayer.shuffle) (tracks.indices).random() else 0) }
+            ui.hits += pb to { MusicPlayer.playQueue(tracks, if (MusicPlayer.shuffle && radio() == null) (tracks.indices).random() else 0, radio()) }
             if (headerH < 100f) headerH = 92f
         }
 

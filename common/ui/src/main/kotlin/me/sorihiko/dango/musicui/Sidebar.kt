@@ -300,7 +300,12 @@ internal class Sidebar(private val screen: MusicScreen) {
             val who = if (native) account!!.nickname.ifEmpty { I18n.text(source.label) + " · " + account.userId }
                 else NeteaseApi.nickname.ifEmpty { I18n.text("Logged in") }
             val vip = native && account!!.isVip
-            ui.text(ui.trim(who + if (vip) " [VIP]" else "", textW, 12f), av.right + 10f, ub.y + 14f, 12f, if (vip) RED else Theme.TEXT_PRIMARY)
+            // 酷狗概念版：名字太长时先缩名字，"· 概念版"一直留着
+            val badge = if (native && account!!.concept) " · " + I18n.text("Lite") else ""
+            val badgeW = if (badge.isEmpty()) 0f else ui.width(badge, 12f)
+            val shown = ui.trim(who + if (vip) " [VIP]" else "", textW - badgeW, 12f)
+            ui.text(shown, av.right + 10f, ub.y + 14f, 12f, if (vip) RED else Theme.TEXT_PRIMARY)
+            if (badge.isNotEmpty()) ui.text(badge, av.right + 10f + ui.width(shown, 12f), ub.y + 14f, 12f, Theme.TEXT_SECONDARY)
         } else {
             // 没登录：只有头像 + "登录"这一块是按钮，不是整行
             val label = ui.trim(I18n.text("Log in"), textW, 12f, Theme.FONT_SEMIBOLD)

@@ -308,7 +308,7 @@ Color of the translation	翻译的文字颜色
 Under each line	原文下方
 Dance	跳舞
 Mobs on the beat	生物跟着节奏
-Mob dance	生物跟着摇
+Mob dance	生物跟着节奏弹
 Every creature in the world squashes and stretches on the beat of the song	世界里所有生物踩着歌曲的节拍压扁再拉长
 Spin	转圈
 Creatures also spin around steadily	生物同时匀速转圈
@@ -322,3 +322,27 @@ Tap BPM	自己点 BPM
 Left-click 16 times on the beat to set the BPM yourself; counting starts with your first click (recommended, most accurate)	跟着节拍左键点 16 下自己定 BPM，点第一下才开始算（最推荐，最准）
 Night glow only	只在晚上发光
 Turn glow off in daylight and back on when it gets dark	白天关掉发光，天黑了自动打开
+Kugou rejected the login (error %s). Refresh the QR code and try again.	酷狗拒绝了这次登录（错误 %s），请刷新二维码重试。
+Environment audio	环境音效
+Sound around you	音乐跟着环境变
+Music changes with where you are	歌曲会随你所在的地方变化
+Underwater	水下变闷
+Muffled while your head is underwater	头在水里时声音变闷，像隔着水听
+Cave echo	洞穴回声
+Echo in enclosed places with no sky above	在头顶看不到天空、四周封闭的地方加回声
+Indoors	室内变闷
+Slightly muffled, with some room echo, under a roof	头顶有遮挡时声音稍微变闷，带一点房间的回声
+Rain	下雨压低
+A little quieter in rain and thunder	下雨、打雷时音量稍微降低
+Effect strength	效果强度
+How strong the environment effects are	环境音效的强弱
+Scan with Kugou Lite	使用酷狗概念版 App 扫码
+Free VIP claimed for you every day	每天自动领免费会员
+Kugou asks for a security check. Open the Kugou app, play a song there, then try again.	酷狗要求做一次安全验证。请打开酷狗 App 放一首歌，然后再试一次。
+Lite	概念版
+Preview only: membership is needed for the full song	仅试听片段：需要会员才能听完整首
+The original was unavailable, playing another version	原版放不了，已换成其他版本
+Volume normalization	音量均衡
+Keep songs at a similar loudness	让不同的歌听起来差不多响
+Could not add to Liked songs. Please retry.	没能加入"我喜欢"，请重试。
+Could not remove from Liked songs. Please retry.	没能取消红心，请重试。

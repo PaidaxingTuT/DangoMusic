@@ -23,6 +23,10 @@ class NativeAccount @JvmOverloads constructor(
     internal val cookies: CookieManager,
     val loginType: Int = 2,
     val avatarUrl: String = "",
+    /** 酷狗：用概念版扫码登录的（之后取歌、领会员都用概念版的身份）。旧的登录信息没有这一项，按普通版算 */
+    val concept: Boolean = false,
+    /** QQ：续期登录用的凭证（refresh_key 等，见 [QqRenewal]）。旧的登录信息没有，到期后只能重新扫码 */
+    internal val renewal: JsonObject? = null,
     val isVip: Boolean = false,
 )
 
@@ -36,7 +40,9 @@ object NativeAccounts {
     }
     private fun path(source: MusicSource) = DangoMusic.instance.clientDir.resolve("${source.key}_session.json")
 
-    fun get(source: MusicSource): NativeAccount? = synchronized(lock) {
+    fun get(source: MusicSource): NativeAccount? = load(source)?.also(::renewIfDue)
+
+    private fun load(source: MusicSource): NativeAccount? = synchronized(lock) {
         if (source == MusicSource.NETEASE) return@synchronized null
         if (loaded.add(source)) {
             try {
@@ -65,7 +71,10 @@ object NativeAccounts {
                         }
                     }
                     val account = NativeAccount(source, root.text("userId"), root.text("nickname"), root.text("token"), root.text("deviceId"), manager,
-                        if (root.has("loginType")) root.number("loginType").toInt() else 2, root.text("avatarUrl"), root.get("isVip")?.asBoolean ?: false)
+                        if (root.has("loginType")) root.number("loginType").toInt() else 2, root.text("avatarUrl"),
+                        root.get("concept")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: false,
+                        root.get("renewal")?.takeIf { it.isJsonObject && source == MusicSource.QQ }?.asJsonObject,
+                        root.get("isVip")?.asBoolean ?: false)
                     if (account.userId.matches(Regex("[0-9]{1,20}")) && account.userId.any { it != '0' } &&
                         (if (source == MusicSource.QQ) manager.cookieStore.cookies.any { it.name == "qqmusic_key" } else account.token.isNotEmpty())) accounts[source] = account
                 }
@@ -83,6 +92,8 @@ object NativeAccounts {
             addProperty("nickname", account.nickname); addProperty("token", account.token); addProperty("deviceId", account.deviceId)
             addProperty("loginType", account.loginType)
             addProperty("avatarUrl", account.avatarUrl); addProperty("isVip", account.isVip)
+            if (account.concept) addProperty("concept", true)
+            if (account.renewal != null) add("renewal", account.renewal)
             add("cookies", JsonArray().apply {
                 for (origin in account.cookies.cookieStore.urIs) {
                     // Java's cookie store normalizes its origin index to http:// even for HTTPS.
@@ -107,6 +118,25 @@ object NativeAccounts {
         loaded.add(account.source)
     }
 
+    private val renewAttempts = ConcurrentHashMap<MusicSource, Long>()
+
+    /** QQ 的登录三天就到期：快到期时在后台续一次（失败了过一会儿再试，不影响现在的登录） */
+    private fun renewIfDue(account: NativeAccount) {
+        if (!QqRenewal.due(account)) return
+        val now = System.currentTimeMillis()
+        val last = renewAttempts[account.source]
+        if (last != null && now - last < QqRenewal.RETRY_MS) return
+        renewAttempts[account.source] = now
+        profileWorker.execute {
+            try {
+                val renewed = QqAppSession().renew(account) ?: return@execute
+                synchronized(lock) { if (accounts[account.source] === account) save(renewed) }
+            } catch (e: Exception) {
+                me.sorihiko.dango.DangoLogger.warn("QQ Music login renewal failed: {}", e.javaClass.simpleName)
+            }
+        }
+    }
+
     /** Also fills profiles saved by earlier beta versions, without another QR login. */
     fun refreshProfile(source: MusicSource) {
         if (source == MusicSource.NETEASE) return
@@ -123,9 +153,11 @@ object NativeAccounts {
                     else if (source == MusicSource.KUGOU_CONCEPT) {
                         val profile = KugouConcept.userInfo(account)
                         NativeAccount(source, account.userId, profile.nickname.ifEmpty { account.nickname }, account.token,
-                            account.deviceId, account.cookies, account.loginType, profile.avatar.ifEmpty { account.avatarUrl }, profile.isVip)
+                            account.deviceId, account.cookies, account.loginType, profile.avatar.ifEmpty { account.avatarUrl },
+                            account.concept, account.renewal, profile.isVip)
                     } else NativeAccount(source,account.userId,account.nickname,account.token,account.deviceId,account.cookies,account.loginType,
-                        KugouCatalog.image(KugouWeb.cookiePart(account.cookies,"Pic").ifEmpty { cookie(account.cookies,"KugooPic") }).ifEmpty { account.avatarUrl }, account.isVip)
+                        KugouCatalog.image(KugouWeb.cookiePart(account.cookies,"Pic").ifEmpty { cookie(account.cookies,"KugooPic") }).ifEmpty { account.avatarUrl },
+                        account.concept, account.renewal, account.isVip)
                 updateProfileIfCurrent(account, updated)
             } catch (_: Exception) {
                 profileAttempts.remove(source, account)

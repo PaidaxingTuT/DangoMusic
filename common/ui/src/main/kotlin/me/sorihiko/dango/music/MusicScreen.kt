@@ -50,6 +50,10 @@ class MusicScreen(
     private val grid = GridPage(this)
     private val party = PartyPage(this)
     private val settings = SettingsPage(this, module)
+
+    /** 有输入框在打字（搜索、筛选、房间码、代理、设置里改数值 / 颜色）：平台层据此让系统输入法可用 */
+    val textInputActive: Boolean
+        get() = sidebar.searchFocused || tracks.filterFocused || party.codeFocused || party.proxyFocused || settings.editing
     private val bar = PlayerBar(this, module)
 
     private var openedAt = 0L
