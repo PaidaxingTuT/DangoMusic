@@ -102,6 +102,7 @@ internal class LoginDialog(private val screen: MusicScreen) {
             NeteaseLogin.State.WAITING -> I18n.text(when (provider) {
                 MusicSource.QQ -> "Scan with the QQ Music app"
                 MusicSource.KUGOU -> "Scan with the Kugou Music app"
+                MusicSource.KUGOU_CONCEPT -> "Scan with the Kugou Concept app"
                 else -> "打开手机网易云音乐 App 扫码"
             })
             NeteaseLogin.State.SCANNED -> if (native && NativeLogin.message.isNotEmpty()) I18n.text(NativeLogin.message)

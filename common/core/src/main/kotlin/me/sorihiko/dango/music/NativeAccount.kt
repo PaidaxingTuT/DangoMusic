@@ -23,6 +23,7 @@ class NativeAccount @JvmOverloads constructor(
     internal val cookies: CookieManager,
     val loginType: Int = 2,
     val avatarUrl: String = "",
+    val isVip: Boolean = false,
 )
 
 object NativeAccounts {
@@ -64,7 +65,7 @@ object NativeAccounts {
                         }
                     }
                     val account = NativeAccount(source, root.text("userId"), root.text("nickname"), root.text("token"), root.text("deviceId"), manager,
-                        if (root.has("loginType")) root.number("loginType").toInt() else 2, root.text("avatarUrl"))
+                        if (root.has("loginType")) root.number("loginType").toInt() else 2, root.text("avatarUrl"), root.get("isVip")?.asBoolean ?: false)
                     if (account.userId.matches(Regex("[0-9]{1,20}")) && account.userId.any { it != '0' } &&
                         (if (source == MusicSource.QQ) manager.cookieStore.cookies.any { it.name == "qqmusic_key" } else account.token.isNotEmpty())) accounts[source] = account
                 }
@@ -75,11 +76,13 @@ object NativeAccounts {
 
     internal fun save(account: NativeAccount) = synchronized(lock) {
         require(account.source != MusicSource.NETEASE && account.userId.matches(Regex("[0-9]{1,20}")) && account.userId.any { it != '0' })
+        val previous = accounts[account.source]
+        if (previous != null && (previous.userId != account.userId || previous.token != account.token)) profileAttempts.remove(account.source)
         val root = JsonObject().apply {
             addProperty("source", account.source.key); addProperty("userId", account.userId)
             addProperty("nickname", account.nickname); addProperty("token", account.token); addProperty("deviceId", account.deviceId)
             addProperty("loginType", account.loginType)
-            addProperty("avatarUrl", account.avatarUrl)
+            addProperty("avatarUrl", account.avatarUrl); addProperty("isVip", account.isVip)
             add("cookies", JsonArray().apply {
                 for (origin in account.cookies.cookieStore.urIs) {
                     // Java's cookie store normalizes its origin index to http:// even for HTTPS.
@@ -108,7 +111,8 @@ object NativeAccounts {
     fun refreshProfile(source: MusicSource) {
         if (source == MusicSource.NETEASE) return
         val account = get(source) ?: return
-        if (account.nickname.isNotEmpty() && account.avatarUrl.isNotEmpty()) return
+        if (account.nickname.isNotEmpty() && account.avatarUrl.isNotEmpty() &&
+            (source != MusicSource.KUGOU_CONCEPT || profileAttempts.containsKey(source))) return
         synchronized(lock) {
             if (accounts[source] !== account || profileAttempts[source] === account) return
             profileAttempts[source] = account
@@ -116,22 +120,30 @@ object NativeAccounts {
         profileWorker.execute {
             try {
                 val updated = if (source == MusicSource.QQ) QqAppSession().profile(account) { accounts[source] === account }
-                    else NativeAccount(source,account.userId,account.nickname,account.token,account.deviceId,account.cookies,account.loginType,
-                        KugouCatalog.image(KugouWeb.cookiePart(account.cookies,"Pic").ifEmpty { cookie(account.cookies,"KugooPic") }).ifEmpty { account.avatarUrl })
+                    else if (source == MusicSource.KUGOU_CONCEPT) {
+                        val profile = KugouConcept.userInfo(account)
+                        NativeAccount(source, account.userId, profile.nickname.ifEmpty { account.nickname }, account.token,
+                            account.deviceId, account.cookies, account.loginType, profile.avatar.ifEmpty { account.avatarUrl }, profile.isVip)
+                    } else NativeAccount(source,account.userId,account.nickname,account.token,account.deviceId,account.cookies,account.loginType,
+                        KugouCatalog.image(KugouWeb.cookiePart(account.cookies,"Pic").ifEmpty { cookie(account.cookies,"KugooPic") }).ifEmpty { account.avatarUrl }, account.isVip)
                 updateProfileIfCurrent(account, updated)
-            } catch (_: Exception) { /* Cosmetic metadata failure leaves the verified login intact. */ }
+            } catch (_: Exception) {
+                profileAttempts.remove(source, account)
+                // Cosmetic metadata failure leaves the verified login intact and can be retried.
+            }
         }
     }
 
     internal fun updateProfileIfCurrent(expected: NativeAccount, updated: NativeAccount) = synchronized(lock) {
         if (accounts[expected.source] === expected && updated.source == expected.source &&
             updated.userId == expected.userId &&
-            (updated.nickname != expected.nickname || updated.avatarUrl != expected.avatarUrl)) save(updated)
+            (updated.nickname != expected.nickname || updated.avatarUrl != expected.avatarUrl || updated.isVip != expected.isVip)) save(updated)
     }
 
     fun logout(source: MusicSource) = synchronized(lock) {
         Files.deleteIfExists(path(source))
         accounts.remove(source)
+        profileAttempts.remove(source)
         loaded.add(source)
         Unit
     }

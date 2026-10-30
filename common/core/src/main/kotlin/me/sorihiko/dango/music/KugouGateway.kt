@@ -20,9 +20,11 @@ internal object KugouGateway {
     private fun md5(value: String) = MessageDigest.getInstance("MD5").digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it.toInt() and 255) }
 
+    internal fun recommendationKey(clienttime: Long) = md5("1005${SALT}20489$clienttime")
+
     fun request(path: String, values: Map<String, String>, body: JsonObject?, account: NativeAccount?): JsonObject {
         require(path.startsWith("/") && !path.contains('?') && !path.contains(".."))
-        require(account == null || account.source == MusicSource.KUGOU)
+        require(account == null || account.source == MusicSource.KUGOU || account.source == MusicSource.KUGOU_CONCEPT)
         val device = account?.deviceId?.takeIf { it.isNotEmpty() } ?: guestDevice
         val mid = BigInteger(md5(device),16).toString()
         val now = (System.currentTimeMillis()/1000).toString()
@@ -35,6 +37,10 @@ internal object KugouGateway {
                 "User-Agent" to "Android15-AndroidPhone-20489-46-0-wifi", "mid" to mid, "dfid" to dfid,
                 "clienttime" to now, "kg-rc" to "1", "kg-rec" to "1", "kg-thash" to "5d816a0", "kg-rf" to "B9EDA08A64250DEFFBCADDEE00F8F25F")
         var route = path
+        when (path) {
+            "/v2/special_recommend" -> headers["x-router"] = "specialrec.service.kugou.com"
+            "/api/v3/special/song" -> headers["x-router"] = "mobilecdn.kugou.com"
+        }
         if (account != null && path.startsWith("/cloudlist.service/")) {
             // The stored token belongs to the website login, not to Android appid=1005.
             // Use the matching H5 profile and cloudlist router for private lists.
@@ -46,7 +52,7 @@ internal object KugouGateway {
             headers["User-Agent"] = "Mozilla/5.0"; headers["x-router"] = "cloudlist.service.kugou.com"
             params["signature"] = webSignature(params,text)
         } else params["signature"] = signature(params,text)
-        val response = AuthHttp.request(MusicSource.KUGOU,"https://gateway.kugou.com$route?${AuthHttp.form(params)}",
+        val response = AuthHttp.request(account?.source ?: MusicSource.KUGOU,"https://gateway.kugou.com$route?${AuthHttp.form(params)}",
             account?.cookies ?: CookieManager(),body?.toString(),"application/json", headers)
         val root = response.json()
         val code = root.number("error_code").takeIf { it != 0L } ?: root.number("err_code")

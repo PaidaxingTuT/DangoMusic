@@ -11,39 +11,54 @@ object KugouMusicSource : MusicSourceApi {
     private const val REFERER = "https://m.kugou.com/"
     private val catalog = KugouCatalog()
     override fun playlists() = catalog.playlists()
-    override fun recommend() = catalog.recommend()
+    override fun recommend(): List<NeteasePlaylist> {
+        val special = runCatching { catalog.specialRecommend() }.getOrDefault(emptyList())
+        return special.ifEmpty { catalog.recommend() }
+    }
     override fun charts() = catalog.charts()
     override fun playlistTracks(id: Long) = catalog.tracks(id)
 
-    override fun search(query: String): List<NeteaseTrack> {
+    override fun search(query: String) = searchFor(query, source)
+
+    internal fun searchFor(query: String, resultSource: MusicSource): List<NeteaseTrack> {
         val root = SourceHttp.json("https://msearchretry.kugou.com/api/v3/search/song?format=json&page=1&pagesize=40&showtype=1&keyword=${SourceHttp.enc(query)}", REFERER)
         check(root.number("status") == 1L) { "Kugou search rejected" }
-        return parseSearch(root)
+        return parseSearch(root, resultSource)
     }
 
-    internal fun parseSearch(root: JsonObject): List<NeteaseTrack> {
+    internal fun parseSearch(root: JsonObject, resultSource: MusicSource = MusicSource.KUGOU): List<NeteaseTrack> {
         val list = root.getAsJsonObject("data")?.getAsJsonArray("info") ?: return emptyList()
-        return list.mapNotNull { entry -> if (entry.isJsonObject) parseTrack(entry.asJsonObject) else null }.distinctBy { it.key }
+        return list.mapNotNull { entry -> if (entry.isJsonObject) parseTrack(entry.asJsonObject, resultSource) else null }.distinctBy { it.key }
     }
 
-    internal fun parseTrack(song: JsonObject): NeteaseTrack? {
-        val hash = song.text("hash").ifEmpty { song.text("Hash").ifEmpty { song.text("filehash") } }.uppercase(java.util.Locale.ROOT)
+    internal fun parseTrack(song: JsonObject, resultSource: MusicSource = MusicSource.KUGOU): NeteaseTrack? {
+        val hash = song.text("hash").ifEmpty { song.text("Hash").ifEmpty { song.text("filehash")
+            .ifEmpty { song.text("FileHash").ifEmpty { song.obj("audio_info")?.text("hash_128").orEmpty() } } } }.uppercase(java.util.Locale.ROOT)
         if (!hash.matches(Regex("[A-F0-9]{32}"))) return null
         val filename = song.text("filename").ifEmpty { song.text("FileName").ifEmpty { song.text("name") } }
-        val title = song.text("songname").ifEmpty { filename.substringAfter(" - ",filename) }
+        val title = song.text("songname").ifEmpty { song.text("audio_name").ifEmpty { song.text("SongName").ifEmpty { filename.substringAfter(" - ", filename) } } }
         val names = song.array("singerinfo").mapNotNull { if (it.isJsonObject) it.asJsonObject.text("name").takeIf { s -> s.isNotBlank() } else null }
             .ifEmpty { song.array("authors").mapNotNull { if (it.isJsonObject) it.asJsonObject.text("author_name").takeIf { s -> s.isNotBlank() } else null } }
-            .ifEmpty { song.text("singername").ifEmpty { if (" - " in filename) filename.substringBefore(" - ") else "" }.split("、").filter { it.isNotBlank() } }
+            .ifEmpty { song.array("singers").mapNotNull { if (it.isJsonObject) it.asJsonObject.text("name").takeIf { s -> s.isNotBlank() } else null } }
+            .ifEmpty { song.text("singername").ifEmpty { song.text("author_name").ifEmpty { if (" - " in filename) filename.substringBefore(" - ") else "" } }.split("、").filter { it.isNotBlank() } }
         val ms = song.number("timelen").takeIf { it > 0 } ?: song.number("timeLen").takeIf { it > 0 }
-            ?: song.number("duration")*1000
-        val cover = song.text("imgurl").ifEmpty { song.text("album_sizable_cover").ifEmpty { song.obj("trans_param")?.text("union_cover").orEmpty() } }
-        return NeteaseTrack(MusicSources.stableId(source,hash),cleanSourceText(title),names.map(::cleanSourceText),ms,
-            KugouCatalog.image(cover),source,hash,hash,song.text("album_id").ifEmpty { song.text("albumId") })
+            ?: song.number("Duration").takeIf { it > 0 }?.times(1000)
+            ?: song.number("timelength").takeIf { it > 0 }
+            ?: song.obj("audio_info")?.number("duration_128")?.takeIf { it > 0 }
+            ?: song.obj("audio_info")?.number("timelength")?.takeIf { it > 0 }
+            ?: song.number("duration") * 1000
+        val cover = song.text("imgurl").ifEmpty { song.text("Image").ifEmpty { song.text("album_sizable_cover")
+            .ifEmpty { song.obj("album_info")?.text("sizable_cover").orEmpty() }
+            .ifEmpty { song.obj("trans_param")?.text("union_cover").orEmpty() } } }
+        return NeteaseTrack(MusicSources.stableId(resultSource,hash),cleanSourceText(title),names.map(::cleanSourceText),ms,
+            KugouCatalog.image(cover),resultSource,hash,hash,song.text("album_id").ifEmpty { song.text("albumId").ifEmpty { song.text("AlbumID")
+                .ifEmpty { song.obj("album_info")?.text("album_id").orEmpty() } } },
+            song.text("album_audio_id").ifEmpty { song.text("AlbumAudioID").ifEmpty { song.text("albumAudioId") } })
     }
 
     override fun songUrl(track: NeteaseTrack): NeteaseApi.SongUrl? {
-        require(track.source == source && track.nativeId.matches(Regex("[A-Fa-f0-9]{32}")))
-        val account = NativeAccounts.get(source)
+        require((track.source == MusicSource.KUGOU || track.source == MusicSource.KUGOU_CONCEPT) && track.nativeId.matches(Regex("[A-Fa-f0-9]{32}")))
+        val account = NativeAccounts.get(track.source)
         if (account != null) {
             val response = KugouWeb.songInfo(track, account)
             val data = response.get("data")?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
@@ -73,11 +88,11 @@ object KugouMusicSource : MusicSourceApi {
         try {
             val krc = SourceHttp.json("https://lyrics.kugou.com/download?ver=1&client=pc&fmt=krc&charset=utf8&id=${SourceHttp.enc(candidate.text("id"))}&accesskey=${SourceHttp.enc(candidate.text("accesskey"))}", REFERER)
             val lines = KugouLyrics.decode(krc.text("content"))
-            if (lines.isNotEmpty()) return Lyrics(lines,source.label)
+            if (lines.isNotEmpty()) return Lyrics(lines,track.source.label)
         } catch (_: Exception) { /* Not every recording has KRC; retain the line-timed fallback. */ }
         val root = SourceHttp.json("https://lyrics.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8&id=${SourceHttp.enc(candidate.text("id"))}&accesskey=${SourceHttp.enc(candidate.text("accesskey"))}", REFERER)
         val text = String(Base64.getDecoder().decode(root.text("content")), Charsets.UTF_8)
         val lines = LyricsProvider.parseLrc(text)
-        return if (lines.isEmpty()) null else Lyrics(lines, source.label)
+        return if (lines.isEmpty()) null else Lyrics(lines, track.source.label)
     }
 }

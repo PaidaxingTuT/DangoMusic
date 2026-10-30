@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dango Music · 音源选择</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      color: #f5f5f7;
+      font: 14px/1.5 system-ui, "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 18% 30%, #3e183caa, transparent 35%),
+        radial-gradient(circle at 85% 75%, #163e48aa, transparent 38%),
+        #111217;
+    }
+    .player {
+      width: min(880px, calc(100% - 32px));
+      padding: 32px;
+      border: 1px solid #ffffff14;
+      border-radius: 30px;
+      background: linear-gradient(135deg, #ffffff0d, #ffffff05);
+      box-shadow: 0 30px 80px #0006, inset 0 1px #ffffff14;
+      backdrop-filter: blur(24px);
+    }
+    .eyebrow { color: #ff5c8a; font-size: 11px; font-weight: 700; letter-spacing: .18em; }
+    h1 { margin: 8px 0; font-size: clamp(22px, 4vw, 32px); }
+    .hint { margin: 0 0 32px; color: #ffffff70; }
+    .sources {
+      position: relative;
+      isolation: isolate;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid #ffffff14;
+      border-radius: 22px;
+      background: #08090c66;
+      box-shadow: inset 0 2px 8px #0003;
+    }
+    .bubble {
+      position: absolute;
+      z-index: -1;
+      top: var(--y, 6px);
+      left: var(--x, 6px);
+      width: var(--w, 0px);
+      height: var(--h, calc(100% - 12px));
+      border: 1px solid #ff8bac45;
+      border-radius: 16px;
+      background:
+        radial-gradient(circle at 30% 0%, #ffffff24, transparent 65%),
+        linear-gradient(135deg, #ff5c8a52, #ff5c8a20);
+      box-shadow: inset 0 1px #ffffff30, 0 5px 20px #ff5c8a18;
+      transition: left .35s cubic-bezier(.2, .9, .25, 1.15), top .35s cubic-bezier(.2, .9, .25, 1.15), width .35s cubic-bezier(.2, .9, .25, 1.15);
+    }
+    .source {
+      min-width: 0;
+      padding: 14px 10px;
+      border: 0;
+      border-radius: 16px;
+      color: #ffffff80;
+      font: inherit;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      background: transparent;
+      transition: color .2s, transform .2s;
+    }
+    .source:hover { color: #fff; background: #ffffff08; }
+    .kugou-source {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-width: 0;
+      border: 1px solid #ffffff10;
+      border-radius: 16px;
+      box-shadow: inset 0 1px #ffffff08;
+    }
+    .kugou-source .source { padding-inline: 4px; font-size: 13px; }
+    .kugou-source .source + .source { border-left: 1px solid #ffffff10; }
+    .source:active { transform: scale(.97); }
+    .source[aria-pressed="true"] { color: #fff; }
+    .source:focus-visible { outline: 2px solid #ff8bac; outline-offset: -2px; }
+    .note { margin: 24px 2px 0; color: #ffffff55; font-size: 12px; }
+    @media (max-width: 560px) {
+      .player { padding: 22px 16px; }
+      .source { padding: 12px 6px; font-size: 12px; }
+      .kugou-source .source { font-size: 12px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main class="player">
+    <div class="eyebrow">DANGO MUSIC</div>
+    <h1>选择音乐来源</h1>
+    <p class="hint">点击切换音源，查看选中项的气泡效果。</p>
+    <div class="sources" id="sources" role="group" aria-label="音乐来源">
+      <div class="bubble" aria-hidden="true"></div>
+      <button class="source" aria-pressed="true">网易云</button>
+      <button class="source" aria-pressed="false">QQ 音乐</button>
+      <div class="kugou-source">
+        <button class="source" aria-pressed="false">酷狗音乐</button>
+        <button class="source" aria-pressed="false">概念版</button>
+      </div>
+    </div>
+    <p class="note">前端 UI 预览 · 概念版使用独立 App 会话与播放协议</p>
+  </main>
+  <script>
+    const sources = document.querySelector('#sources');
+    const bubble = sources.querySelector('.bubble');
+    const buttons = [...sources.querySelectorAll('button')];
+    function select(button) {
+      buttons.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      bubble.style.setProperty('--x', `${button.offsetLeft}px`);
+      bubble.style.setProperty('--y', `${button.offsetTop}px`);
+      bubble.style.setProperty('--w', `${button.offsetWidth}px`);
+      bubble.style.setProperty('--h', `${button.offsetHeight}px`);
+    }
+    buttons.forEach(button => button.addEventListener('click', () => select(button)));
+    new ResizeObserver(() => select(buttons.find(button => button.getAttribute('aria-pressed') === 'true'))).observe(sources);
+    select(buttons[0]);
+  </script>
+</body>
+</html>

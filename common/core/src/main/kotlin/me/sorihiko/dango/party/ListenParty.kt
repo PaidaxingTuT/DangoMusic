@@ -120,7 +120,7 @@ object ListenParty {
 
     fun supportsSource(source: MusicSource): Boolean = source == MusicSource.NETEASE ||
         (source == MusicSource.QQ && (role == Role.NONE || roomProtocol >= 2)) ||
-        (source == MusicSource.KUGOU && (role == Role.NONE || roomProtocol >= 3))
+        ((source == MusicSource.KUGOU || source == MusicSource.KUGOU_CONCEPT) && (role == Role.NONE || roomProtocol >= 3))
 
     /**
      * 房主超过 [ABANDONED_MS] 没心跳的房间算废弃，可以被新房间接管。

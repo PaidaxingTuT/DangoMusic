@@ -54,6 +54,11 @@ internal class Sidebar(private val screen: MusicScreen) {
     private var pillDown = false
 
     private val MENU_ITEM_H = 30f
+    private val sourceRows = listOf(
+        listOf(MusicSource.NETEASE),
+        listOf(MusicSource.QQ),
+        listOf(MusicSource.KUGOU, MusicSource.KUGOU_CONCEPT),
+    )
 
     /** 音源菜单的液态玻璃：比侧栏更暗、更磨砂，保证上面的字看得清 */
     private val MENU_GLASS = GlassStyle(
@@ -294,7 +299,8 @@ internal class Sidebar(private val screen: MusicScreen) {
             ui.drawCover(av, if (aurl.isNotEmpty()) CoverCache.get(avatarKey, aurl) else null, 14f)
             val who = if (native) account!!.nickname.ifEmpty { I18n.text(source.label) + " · " + account.userId }
                 else NeteaseApi.nickname.ifEmpty { I18n.text("Logged in") }
-            ui.text(ui.trim(who, textW, 12f), av.right + 10f, ub.y + 14f, 12f, Theme.TEXT_PRIMARY)
+            val vip = native && account!!.isVip
+            ui.text(ui.trim(who + if (vip) " [VIP]" else "", textW, 12f), av.right + 10f, ub.y + 14f, 12f, if (vip) RED else Theme.TEXT_PRIMARY)
         } else {
             // 没登录：只有头像 + "登录"这一块是按钮，不是整行
             val label = ui.trim(I18n.text("Log in"), textW, 12f, Theme.FONT_SEMIBOLD)
@@ -312,7 +318,7 @@ internal class Sidebar(private val screen: MusicScreen) {
 
     /** 音源菜单的上沿（菜单高度：三个音源 + 已登录时的分隔线和"退出登录"） */
     private fun menuTop(side: LayoutBounds): Float {
-        val h = 8f + MusicSource.values().size * MENU_ITEM_H + (if (loggedIn(MusicSources.selected)) 9f + MENU_ITEM_H else 0f) + 8f
+        val h = 8f + sourceRows.size * MENU_ITEM_H + (if (loggedIn(MusicSources.selected)) 9f + MENU_ITEM_H else 0f) + 8f
         return side.bottom - 46f - 6f - h
     }
 
@@ -352,11 +358,10 @@ internal class Sidebar(private val screen: MusicScreen) {
         return LayoutBounds(right - w, bottom - h, w, h)
     }
 
-    /** 音源菜单：在账号栏上方弹出，三个音源（已登录的带小圆点）+ 退出当前账号 */
+    /** 音源菜单：三个外层胶囊（酷狗内分两端，已登录的带小圆点）+ 退出当前账号 */
     private fun drawSourceMenu(side: LayoutBounds, menu: LayoutBounds) {
         val ctx = ui.ctx
         val current = MusicSources.selected
-        val sources = MusicSource.values()
         val itemH = MENU_ITEM_H
         val canLogOut = loggedIn(current)
         val full = LayoutBounds(side.x + 6f, menuTop(side), side.width - 12f, 0f)
@@ -379,20 +384,29 @@ internal class Sidebar(private val screen: MusicScreen) {
             index++
             return LayoutBounds(full.x + 6f, rowY + (1f - a) * 8f, full.width - 12f, itemH - 2f) to a
         }
-        for (s in sources) {
+        for (group in sourceRows) {
             val (row, a) = rowAt(y)
-            val on = s == current
-            ctx.pushOpacity(a)
-            if (on) ui.card(row, RED.copy(a = 0.20f), 8f) else if (interactive && ui.hover(row)) ui.card(row, Theme.CARD_HOVER, 8f)
-            if (loggedIn(s)) ctx.drawShape(LayoutBounds(row.x + 10f, row.y + row.height / 2f - 3f, 6f, 6f), ShapeStyle(Theme.GREEN, 3f))
-            ui.text(I18n.text(s.label), row.x + 24f, row.y + 9f, 12f, if (on) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY,
-                if (on) Theme.FONT_SEMIBOLD else Theme.FONT_MEDIUM)
-            ctx.popOpacity()
-            if (interactive) {
-                menuRects += row
-                hits += row to {
-                    menuOpen = false
-                    screen.selectSource(s)
+            // 酷狗和概念版共用一个外层胶囊，内部按 50% / 50% 分栏。
+            val leftW = (row.width - 4f) * 0.5f
+            for ((index, s) in group.withIndex()) {
+                val segment = when {
+                    group.size == 1 -> row
+                    index == 0 -> LayoutBounds(row.x, row.y, leftW, row.height)
+                    else -> LayoutBounds(row.x + leftW + 4f, row.y, row.width - leftW - 4f, row.height)
+                }
+                val on = s == current
+                ctx.pushOpacity(a)
+                if (on) ui.card(segment, RED.copy(a = 0.20f), 8f) else if (interactive && ui.hover(segment)) ui.card(segment, Theme.CARD_HOVER, 8f)
+                if (loggedIn(s)) ctx.drawShape(LayoutBounds(segment.x + 8f, segment.y + segment.height / 2f - 3f, 6f, 6f), ShapeStyle(Theme.GREEN, 3f))
+                ui.text(I18n.text(s.label), segment.x + 20f, segment.y + 9f, 12f, if (on) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY,
+                    if (on) Theme.FONT_SEMIBOLD else Theme.FONT_MEDIUM)
+                ctx.popOpacity()
+                if (interactive) {
+                    menuRects += segment
+                    hits += segment to {
+                        menuOpen = false
+                        screen.selectSource(s)
+                    }
                 }
             }
             y += itemH

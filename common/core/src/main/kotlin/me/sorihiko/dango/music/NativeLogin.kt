@@ -30,7 +30,7 @@ object NativeLogin {
         }
         Thread({
             try {
-                if (provider == MusicSource.QQ) qq(current) else kugou(current)
+                if (provider == MusicSource.QQ) qq(current) else kugou(current, provider)
             } catch (error: Exception) {
                 update(current) {
                     state = NeteaseLogin.State.ERROR
@@ -132,11 +132,14 @@ object NativeLogin {
         }
     }
 
-    private fun kugou(current: Int) {
+    private fun kugou(current: Int, provider: MusicSource) {
         val cookies = CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER)
         val device = UUID.randomUUID().toString().replace("-", "")
-        val root = KugouWeb.get("https://login-user.kugou.com/v2/qrcode", mapOf("clientver" to "1000", "type" to "1", "plat" to "4",
-            "qrcode_txt" to "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=1014&"), device, cookies)
+        val concept = provider == MusicSource.KUGOU_CONCEPT
+        if (concept) KugouConcept.registerDevice(device, cookies)
+        val root = KugouWeb.get("https://login-user.kugou.com/v2/qrcode", mapOf("appid" to if (concept) "1001" else "1014",
+            "clientver" to "1000", "type" to "1", "plat" to "4",
+            "qrcode_txt" to "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=${if (concept) "3116" else "1014"}&"), device, cookies, provider)
         check(root.number("status") == 1L)
         val data = root.getAsJsonObject("data") ?: error("No Kugou QR")
         val key = data.text("qrcode")
@@ -149,7 +152,8 @@ object NativeLogin {
             Thread.sleep(2000)
             if (current != session) return
             val poll = KugouWeb.get("https://login-user.kugou.com/v2/get_userinfo_qrcode",
-                mapOf("clientver" to "1000", "plat" to "4", "qrcode" to key), device, cookies)
+                mapOf("clientver" to "1000", "plat" to "4", "qrcode" to key,
+                    "appid" to if (concept) "3116" else "1014"), device, cookies, provider)
             check(poll.number("status") == 1L)
             val state = poll.getAsJsonObject("data") ?: error("No Kugou QR status")
             when (state.number("status")) {
@@ -161,14 +165,20 @@ object NativeLogin {
                     val token = info.text("token").ifEmpty { state.text("token") }
                     check(id.isNotEmpty() && token.isNotEmpty())
                     if (current != session) return
-                    val exchanged = KugouWeb.tokenLogin(id, token, device, cookies)
+                    if (concept) {
+                        val nickname = info.text("nickname").ifEmpty { state.text("nickname") }
+                        val avatar = KugouCatalog.image(info.text("pic").ifEmpty { info.text("picurl") })
+                        success(current, NativeAccount(provider, id, nickname, token, device, cookies, avatarUrl = avatar))
+                        return
+                    }
+                    val exchanged = KugouWeb.tokenLogin(id, token, device, cookies, provider)
                     val accountData = exchanged.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
                     val webToken = KugouWeb.cookiePart(cookies, "t").ifEmpty { accountData?.text("token").orEmpty() }
                     check(webToken.isNotEmpty())
                     val webId = KugouWeb.cookiePart(cookies, "KugooID").ifEmpty { id }
                     val nickname = accountData?.text("nickname").orEmpty().ifEmpty { info.text("nickname").ifEmpty { state.text("nickname") } }
                     val avatar = KugouCatalog.image(accountData?.text("pic").orEmpty().ifEmpty { info.text("pic").ifEmpty { info.text("picurl") } })
-                    success(current, NativeAccount(MusicSource.KUGOU, webId, nickname, webToken, device, cookies, avatarUrl = avatar))
+                    success(current, NativeAccount(provider, webId, nickname, webToken, device, cookies, avatarUrl = avatar))
                     return
                 }
                 else -> { update(current) { this.state = NeteaseLogin.State.EXPIRED }; return }

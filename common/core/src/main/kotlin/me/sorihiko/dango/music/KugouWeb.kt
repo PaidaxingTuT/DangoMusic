@@ -25,13 +25,13 @@ internal object KugouWeb {
         return params
     }
 
-    fun get(path: String, params: Map<String, String>, device: String, cookies: CookieManager): JsonObject =
-        AuthHttp.request(MusicSource.KUGOU, path + "?" + AuthHttp.form(signed(params, device)), cookies).json()
+    fun get(path: String, params: Map<String, String>, device: String, cookies: CookieManager, source: MusicSource = MusicSource.KUGOU): JsonObject =
+        AuthHttp.request(source, path + "?" + AuthHttp.form(signed(params, device)), cookies).json()
 
     fun songInfo(track: NeteaseTrack, account: NativeAccount): JsonObject {
         val result = get("https://wwwapi.kugou.com/play/songinfo",
             mapOf("hash" to track.nativeId, "album_id" to track.albumId, "platid" to "4", "userid" to account.userId, "token" to account.token,
-                "dfid" to NativeAccounts.cookie(account.cookies, "kg_dfid").ifEmpty { "-" }), account.deviceId, account.cookies)
+                "dfid" to NativeAccounts.cookie(account.cookies, "kg_dfid").ifEmpty { "-" }), account.deviceId, account.cookies, account.source)
         if (result.number("err_code") == 30020L) throw SourceAccessException("Kugou requires additional security verification. Please try again later.")
         return result
     }
@@ -42,7 +42,7 @@ internal object KugouWeb {
     }
 
     /** The scanned QR token is one-time: exchange it for the web playback session first. */
-    fun tokenLogin(userId: String, qrToken: String, device: String, cookies: CookieManager): JsonObject {
+    fun tokenLogin(userId: String, qrToken: String, device: String, cookies: CookieManager, source: MusicSource = MusicSource.KUGOU): JsonObject {
         val now = System.currentTimeMillis()
         val alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         val random = SecureRandom()
@@ -51,7 +51,7 @@ internal object KugouWeb {
         val params = mapOf("clientver" to "1000", "clienttime" to (now / 1000).toString(), "dev" to "web", "userid" to userId,
             "plat" to "4", "clienttime_ms" to now.toString(), "pk" to encrypted.first, "params" to encrypted.second)
         val url = "https://loginservice.kugou.com/v1/login_by_token_get?" + AuthHttp.form(signed(params, device))
-        val response = AuthHttp.request(MusicSource.KUGOU, url, cookies, "").json()
+        val response = AuthHttp.request(source, url, cookies, "").json()
         check(response.number("status") == 1L) { "Kugou web session exchange failed" }
         return response
     }
