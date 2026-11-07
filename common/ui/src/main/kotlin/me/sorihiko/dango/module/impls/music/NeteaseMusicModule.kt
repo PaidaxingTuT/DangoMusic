@@ -21,6 +21,7 @@ import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.NeteaseApi
 import me.sorihiko.dango.music.MusicSources
 import me.sorihiko.dango.music.MusicSource
+import me.sorihiko.dango.music.TrackTransitionMode
 import me.sorihiko.dango.platform.Keys
 import me.sorihiko.dango.platform.allowedPlayerKey
 import me.sorihiko.dango.platform.PlayerAction
@@ -121,6 +122,9 @@ class NeteaseMusicModule : Module() {
 
     @ModuleValue("Gapless playback", "Preload the next song and join compatible tracks in solo sequential playback")
     private val gapless = BooleanValue(false)
+
+    @ModuleValue("Track transition", "Transition between compatible tracks in solo sequential playback")
+    private val trackTransition = IntValue(0, TrackTransitionMode.entries.lastIndex, TrackTransitionMode.OFF.ordinal)
 
     @ModuleValue("Environment audio", "Echo follows the room you are in (size and materials), muffled underwater")
     private val envAudio = BooleanValue(true)
@@ -305,6 +309,10 @@ class NeteaseMusicModule : Module() {
         MusicSources.selected = MusicSource.values()[musicSource.value]
         DangoMusic.instance.platform.syncKeyBindings(keyBindings)
         UpdateChecker.tick(checkUpdates.get())
+        if (gapless.get()) {
+            if (trackTransition.value == TrackTransitionMode.OFF.ordinal) trackTransition.setValue(TrackTransitionMode.GAPLESS.ordinal)
+            gapless.set(false)
+        }
         if (!enabled) return
         // 歌词模块一直开着（显示与否由 3D lyrics 控制）；等配置读回之后再检查
         if (++tickCount > 5) lyrics()?.let { if (!it.enabled) it.enabled = true }
@@ -315,7 +323,7 @@ class NeteaseMusicModule : Module() {
         MusicPlayer.repeatOne = repeatOne.get()
 
         MusicPlayer.normalize = normalize.get()
-        MusicPlayer.gapless = gapless.get()
+        MusicPlayer.transitionMode = TrackTransitionMode.entries[trackTransition.value]
 
         // 环境音效：设置和玩家周围的环境交给解码线程
         EnvironmentAudio.enabled = envAudio.get()

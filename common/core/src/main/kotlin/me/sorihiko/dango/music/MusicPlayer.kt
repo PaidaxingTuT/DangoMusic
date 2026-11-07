@@ -35,7 +35,7 @@ object MusicPlayer {
     @Volatile var shuffle = false
     /** 歌曲自然播完时重播当前曲目；手动切歌仍按队列 / Shuffle 工作。 */
     @Volatile var repeatOne = false
-    @Volatile var gapless = false
+    @Volatile var transitionMode = TrackTransitionMode.OFF
     /** 0..1 */
     @Volatile var volume = 0.2f
 
@@ -335,7 +335,10 @@ object MusicPlayer {
     // ---------------------------------------------------------------- 加载 / 解码
 
     private class LoadedTrack(val bytes: ByteArray, val durationMs: Long, val gain: Float, val message: String)
-    private class PreparedNext(val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack)
+    private class PreparedNext(
+        val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack,
+        val mode: TrackTransitionMode, val plan: TrackTransition.Plan?,
+    )
 
     private fun loadTrack(track: NeteaseTrack, active: () -> Boolean): LoadedTrack {
         val kugou = if (track.source == MusicSource.KUGOU) KugouMusicSource.loadAudio(track, active) else null
@@ -372,7 +375,7 @@ object MusicPlayer {
         trackGain = loaded.gain
     }
 
-    private fun canPlayGaplessly() = gapless && !shuffle && !repeatOne && radio == null && !followMode &&
+    private fun canTransition() = transitionMode != TrackTransitionMode.OFF && !shuffle && !repeatOne && radio == null && !followMode &&
         party.role == me.sorihiko.dango.party.ListenParty.Role.NONE
 
     private fun load(gen: Int, track: NeteaseTrack, startAt: (() -> Long)? = null, paused: Boolean = false) {
@@ -551,6 +554,9 @@ object MusicPlayer {
         var finished = false
         var source: AudioDecoder? = null
         var prefetch: Future<PreparedNext>? = null
+        var requested = false
+        var prepared: PreparedNext? = null
+        var prepareMode = transitionMode
         var handoff: PreparedNext? = null
         var boundaryMicros = 0L
         var incomingStartMs = 0L
@@ -591,33 +597,63 @@ object MusicPlayer {
             var outputPauseRevision = pauseRevision
             var pending = first
             while (gen == generation) {
+                (source as? TrackBlend)?.finish()?.let { source = it }
                 val frame = pending ?: source!!.read()
                 pending = null
-                if (frame == null) {
-                    val next = prefetch?.takeIf { it.isDone }?.let { runCatching { it.get() }.getOrNull() }
+                if (prepareMode != transitionMode) {
+                    prefetch?.cancel(true)
+                    prefetch = null
+                    prepared = null
+                    requested = false
+                    prepareMode = transitionMode
+                }
+                prefetch?.takeIf { it.isDone }?.let {
+                    prepared = runCatching { it.get() }.getOrNull()
+                    prefetch = null
+                }
+                val next = prepared
+                val lateMs = next?.plan?.let { decodedMs.toLong() - it.exitMs }
+                val blend = next?.plan?.takeIf {
+                    frame != null && source !is TrackBlend && lateMs != null && lateMs in 0..minOf(500L, it.overlapMs / 2)
+                }
+                if (frame == null || blend != null) {
                     // Java Sound can accept only part of a write when paused, making the boundary uncertain.
-                    if (next != null && out != null && !out.lost && outputPauseRevision == pauseRevision && canPlayGaplessly() &&
+                    if (next != null && next.mode == transitionMode && out != null && !out.lost &&
+                        outputPauseRevision == pauseRevision && canTransition() &&
                         next.index == index + 1 && queue.getOrNull(next.index) === next.track && gen == generation) {
-                        val incoming = runCatching { AudioDecoder.start(next.loaded.bytes, 0L) { gen == generation } }.getOrNull()
+                        val cue = if (blend?.bassExchange == true) blend.entryMs + (lateMs ?: 0L) else blend?.entryMs ?: 0L
+                        val incoming = runCatching {
+                            TrackBlend.openIncoming(next.loaded.bytes, cue) { gen == generation }
+                        }.getOrNull()
                         val head = incoming?.first
-                        if (head != null && head.rate == outputRate && head.channels == outputChannels) {
-                            try { source?.close() } catch (_: Exception) {}
-                            source = incoming.decoder
-                            pending = head
+                        if (head != null && head.rate == outputRate && head.channels == outputChannels &&
+                            (frame == null || (frame.rate == outputRate && frame.channels == outputChannels))) {
+                            if (frame == null) {
+                                try { source?.close() } catch (_: Exception) {}
+                                source = incoming.decoder
+                                pending = head
+                            } else if (blend != null) {
+                                source = TrackBlend(source!!, frame, incoming.decoder, head,
+                                    blend.overlapMs - (lateMs ?: 0L), trackGain, next.loaded.gain, blend.bassExchange)
+                            }
                             handoff = next
                             boundaryMicros = writtenFrames * 1_000_000L / outputRate
-                            incomingStartMs = 0L
-                            decodedMs = 0f
+                            incomingStartMs = incoming.skippedMs.toLong()
+                            decodedMs = incoming.skippedMs
                             lowPass = 0f
                             avgEnergy = 0f
                             lastBeatMs = -1000f
-                            prefetch = null
+                            prepared = null
+                            requested = false
                             continue
                         }
                         try { incoming?.decoder?.close() } catch (_: Exception) {}
+                        prepared = null
                     }
-                    finished = true
-                    break
+                    if (frame == null) {
+                        finished = true
+                        break
+                    }
                 }
                 if (out == null) {
                     val format = AudioFormat(frame.rate.toFloat(), 16, frame.channels, true, false)
@@ -642,14 +678,23 @@ object MusicPlayer {
                 }
                 if (gen != generation) break
                 // 只准备队列里紧接着的一首，下载慢时到 EOF 仍照常切歌。
-                if (prefetch == null && handoff == null && outputPauseRevision == pauseRevision &&
-                    canPlayGaplessly() && durationMs - decodedMs <= 30_000f) {
+                if (!requested && handoff == null && outputPauseRevision == pauseRevision &&
+                    canTransition() && durationMs - decodedMs <= 30_000f) {
                     val nextIndex = index + 1
                     queue.getOrNull(nextIndex)?.let { track ->
+                        val mode = prepareMode
+                        val outgoing = audio ?: bytes
+                        val outgoingMs = durationMs
+                        requested = true
                         prefetch = preloader.submit<PreparedNext> {
                             val active = { gen == generation && !Thread.currentThread().isInterrupted }
                             if (!active()) throw CancellationException()
-                            PreparedNext(nextIndex, track, loadTrack(track, active))
+                            val loaded = loadTrack(track, active)
+                            val plan = runCatching {
+                                TrackTransition.plan(mode, outgoing, loaded.bytes, outgoingMs,
+                                    loaded.durationMs.takeIf { it > 0 } ?: track.durationMs, active)
+                            }.getOrNull()
+                            PreparedNext(nextIndex, track, loaded, mode, plan)
                         }
                     }
                 }
@@ -685,7 +730,7 @@ object MusicPlayer {
                 avgEnergy = if (avgEnergy == 0f) energy else avgEnergy + (energy - avgEnergy) * (frameMs / 1000f).coerceAtMost(1f)
                 decodedMs += frameMs
                 // 音量均衡、环境音效（水下变闷、洞穴回声……）在鼓点检测之后加，不影响节奏判断
-                val gain = handoff?.loaded?.gain ?: trackGain
+                val gain = if (source is TrackBlend) 1f else handoff?.loaded?.gain ?: trackGain
                 if (gain != 1f) for (idx in 0 until len) pcm[idx] = (pcm[idx] * gain).toInt().coerceIn(-32768, 32767).toShort()
                 EnvironmentAudio.process(pcm, len, ch, frame.rate, frameMs)
                 val data = ByteArray(len * 2)
