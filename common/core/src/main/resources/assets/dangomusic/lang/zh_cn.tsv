@@ -338,7 +338,7 @@ Gapless playback	无缝播放
 Preload the next song and join compatible tracks in solo sequential playback	单人顺序播放时提前加载下一首，音频格式兼容时连续播放
 Track transition	歌曲过渡
 Transition between compatible tracks in solo sequential playback	单人顺序播放时，为音频格式兼容的歌曲应用过渡
-Blend tracks in solo playback	单人播放时混合相邻曲目
+Blend tracks in solo playback	过渡混合相邻曲目
 Transition duration	过渡时长
 Target overlap for automatic track transitions	自动切歌时两首歌交叠的目标时长
 Blend on Next	下一首也使用过渡
