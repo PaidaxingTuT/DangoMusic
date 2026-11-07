@@ -16,6 +16,7 @@ import me.sorihiko.dango.module.values.TextValue
 import me.sorihiko.dango.music.LyricFonts
 import me.sorihiko.dango.module.values.ModuleValue
 import me.sorihiko.dango.music.MusicScreen
+import me.sorihiko.dango.music.TrackTransitionMode
 import me.sorihiko.dango.platform.Keys
 import me.sorihiko.dango.platform.allowedPlayerKey
 import me.sorihiko.dango.ui.LayoutBounds
@@ -34,12 +35,13 @@ import kotlin.math.roundToInt
 internal class SettingsPage(private val screen: MusicScreen, private val module: NeteaseMusicModule) {
     private val ui = screen.ui
 
-    private enum class Ctl { TOGGLE, SLIDER, KEY, LANGUAGE, COLOR, FONT, CHOICE }
+    private enum class Ctl { TOGGLE, SLIDER, KEY, LANGUAGE, COLOR, FONT, CHOICE, TRANSITION, NUMBER }
 
     /** scale：显示值 = 实际值 × scale（百分比的选项是 100），手动输入时按显示值换算回去 */
     private class Row(
         val label: String, val desc: String, val value: Any, val ctl: Ctl,
         val dep: BooleanValue?, val fmt: (Any) -> String, val scale: Float = 1f, val key: String = "",
+        val visible: () -> Boolean = { true },
     )
 
     /** owner：所属模块（模块关掉时整组变暗）；toggle：组标题右边显示模块总开关 */
@@ -49,7 +51,6 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
     private val choiceLabels = mapOf(
         "lyricColors" to listOf("Custom color", "Cover color", "Cover gradient", "Rainbow"),
         "audioOutput" to listOf("Auto", "Java Sound", "Game audio (OpenAL)"),
-        "trackTransition" to me.sorihiko.dango.music.TrackTransitionMode.entries.map { it.label },
     )
 
     /** 显示成百分比的选项 */
@@ -78,7 +79,12 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
     private val keyButtons = mutableListOf<LayoutBounds>()
     private val keyResetButtons = mutableListOf<Hit>()
 
-    val editing: Boolean get() = editRow != null || hexEditing
+    val editing: Boolean get() = editRow != null || hexEditing || transitionPicker != null
+
+    private var transitionPicker: IntValue? = null
+    private var transitionAnchor = LayoutBounds()
+    private val transitionHits = mutableListOf<LayoutBounds>()
+    private var transitionFocus = 0
 
     // ---------------------------------------------------------------- 取色器（颜色选项点开后的小面板）
 
@@ -126,17 +132,20 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
     }
 
     fun beginFrame() {
+        transitionHits.clear()
         pickerHits.clear()
         keyButtons.clear()
         keyResetButtons.clear()
     }
 
     fun resetScroll() {
+        transitionPicker = null
         target = 0f
         pos = 0f
     }
 
     fun scroll(wheel: Int) {
+        transitionPicker = null
         target = (target + (if (wheel > 0) -60f else 60f) * (if (DangoClient.platform.ctrlDown) 4f else 1f)).coerceIn(0f, maxScroll)
     }
 
@@ -177,6 +186,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
     /** 点到别处时：收起快捷键录制和数值输入 */
     fun onClickElsewhere(hit: Hit?) {
+        if (transitionPicker != null && (hit == null || transitionHits.none { it === hit.first })) transitionPicker = null
         if (picker != null && (hit == null || pickerHits.none { it === hit.first })) closePicker()
         if (bindingKey != null && (hit == null || hit.first !in keyButtons)) bindingKey = null
         if (editRow != null && (hit == null || hit.first != editRect.intersect(area))) commitEdit()
@@ -215,6 +225,8 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
                 val ctl = when {
                     k == "language" -> Ctl.LANGUAGE
                     k == "lyricFont" -> Ctl.FONT
+                    k == "trackTransition" -> Ctl.TRANSITION
+                    k == "transitionSeconds" -> Ctl.NUMBER
                     k in choiceLabels -> Ctl.CHOICE
                     v is BooleanValue -> Ctl.TOGGLE
                     k == "openKey" || (k.startsWith("key") && v is IntValue) -> Ctl.KEY
@@ -225,7 +237,16 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
                 val dep = deps[k]?.let { all[it]?.second as? BooleanValue }
                 // 歌词字体这一行同时管"平滑字体"开关（像素字体 = 关）
                 val value = if (ctl == Ctl.FONT) FontChoice(v as TextValue, all.getValue("smoothFont").second as BooleanValue) else v
-                Row(ann.name.ifEmpty { k }, ann.desc, value, ctl, dep, fmts[k] ?: ::fmtValue, if (k in percentKeys) 100f else 1f, k)
+                val mode = all["trackTransition"]?.second as? IntValue
+                val visible = {
+                    when (k) {
+                        "transitionSeconds" -> mode?.value == TrackTransitionMode.FADE.ordinal
+                        "transitionTempoMatch" -> mode?.value == TrackTransitionMode.RHYTHM.ordinal
+                        else -> true
+                    }
+                }
+                Row(ann.name.ifEmpty { k }, ann.desc, value, ctl, dep, fmts[k] ?: ::fmtValue,
+                    if (k in percentKeys) 100f else 1f, k, visible)
             }
         }
 
@@ -265,6 +286,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         player.left.remove("shuffle")   // 随机播放用播放栏上的按钮就够了，设置页不再显示（状态照样保存）
         player.left.remove("repeatOne") // 单曲循环同样通过播放栏控制
         player.left.remove("gapless")   // 旧设置用于迁移，界面只显示新的过渡模式。
+        player.left.remove("transitionOnNext")
         player.left.remove("musicSource") // 音源通过侧栏切换。
         for (k in listOf("windowX", "windowY", "windowW", "windowH")) player.left.remove(k) // 拖窗口边缘改，不在设置里显示
         if (!DangoMusic.instance.platform.hasGameAudio) player.left.remove("audioOutput") // 1.8.9 只有 Java Sound
@@ -277,7 +299,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             Group("Player", "Playback", player.m, false, player.take(listOf("volume", "normalize", "audioOutput", "language"))),
             Group("Track transition", if (me.sorihiko.dango.music.MusicPlayer.transitionEngineAvailable)
                 "Blend tracks in solo playback" else "EchoMusic transition engine unavailable in this build", player.m, false,
-                player.take(listOf("trackTransition", "transitionSeconds", "transitionOnNext", "transitionTempoMatch"))),
+                player.take(listOf("trackTransition", "transitionSeconds", "transitionTempoMatch"))),
             Group("Environment audio", "Sound around you", player.m, false, environment),
             Group("Hotkeys", "Click, then press a key · Backspace clears", player.m, false, player.take()),
             Group("Song card", "Overlay", card.m, true, card.take()),
@@ -339,6 +361,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             ui.ctx.drawShape(LayoutBounds(view.right - 4f, ty, 4f, th), ShapeStyle(Color(1f, 1f, 1f, 0.30f), 2f))
         }
         drawPicker(view)
+        drawTransitionPicker(view)
     }
 
     // ---------------------------------------------------------------- 取色器
@@ -513,13 +536,14 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
     private val gap = 14f
     private val rowH = 40f
     private val headH = 36f
+    private fun rowHeight(row: Row): Float = if (row.ctl == Ctl.TRANSITION) 54f else rowH
 
     /** 每组的位置：列号、在列里的 y、高度 */
     private fun layout(groups: List<Group>, view: LayoutBounds): List<Triple<Int, Float, Float>> {
         val cols = if (view.width >= 560f) 2 else 1
         val colY = FloatArray(cols)
         return groups.map { g ->
-            val h = headH + g.rows.size * rowH + 6f
+            val h = headH + g.rows.filter { it.visible() }.sumOf { rowHeight(it).toDouble() }.toFloat() + 6f
             var c = 0
             for (i in 1 until cols) if (colY[i] < colY[c] - 0.5f) c = i
             val p = Triple(c, colY[c], h)
@@ -540,7 +564,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             val (c, gy, gh) = placed[gi]
             val b = LayoutBounds(view.x + c * (colW + gap), view.y + gy - scroll, colW, gh)
             if (b.bottom < view.y || b.y > view.bottom) return@forEachIndexed
-            if (animate) ui.itemAnim(gi) { drawGroup(b, g, view, rowH, headH) } else drawGroup(b, g, view, rowH, headH)
+            if (animate) ui.itemAnim(gi) { drawGroup(b, g, view, headH) } else drawGroup(b, g, view, headH)
         }
     }
 
@@ -595,7 +619,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         }
     }
 
-    private fun drawGroup(b: LayoutBounds, g: Group, clip: LayoutBounds, rowH: Float, headH: Float) {
+    private fun drawGroup(b: LayoutBounds, g: Group, clip: LayoutBounds, headH: Float) {
         val ctx = ui.ctx
         ctx.drawShape(b, ShapeStyle(Color(1f, 1f, 1f, 0.05f), 14f))
         val x = b.x + 14f
@@ -610,6 +634,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         var y = b.y + headH
         val moduleOff = !g.owner.enabled
         for (r in g.rows) {
+            if (!r.visible()) continue
             ctx.drawShape(LayoutBounds(x, y, iw, 1f), ShapeStyle(Color(1f, 1f, 1f, 0.06f)))
             // 依赖的开关 / 整个模块关掉时变暗：渐变过去，不是一下子变
             val dim = moduleOff || (r.dep != null && !r.dep.get())
@@ -617,9 +642,10 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             val alpha = rowFade.getOrPut(r) { Spring(170f, 26f, target) }.tick(target).coerceIn(0.4f, 1f)
             val faded = alpha < 0.999f
             if (faded) ctx.pushOpacity(alpha)
-            drawRow(LayoutBounds(x, y, iw, rowH), r, clip)
+            val height = rowHeight(r)
+            drawRow(LayoutBounds(x, y, iw, height), r, clip)
             if (faded) ctx.popOpacity()
-            y += rowH
+            y += height
         }
     }
 
@@ -632,10 +658,20 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
             Ctl.COLOR -> 92f
             Ctl.FONT -> 166f
             Ctl.CHOICE -> 144f
+            Ctl.TRANSITION -> 144f
+            Ctl.NUMBER -> 144f
         }
         val textW = b.width - ctlW - 14f
         ui.text(ui.trim(I18n.text(r.label), textW, 12f, Theme.FONT_MEDIUM), b.x, b.y + 8f, 12f, Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
-        if (r.desc.isNotEmpty()) ui.text(ui.trim(I18n.text(r.desc), textW, 9.5f), b.x, b.y + 24f, 9.5f, Theme.TEXT_TERTIARY)
+        val description = if (r.ctl == Ctl.TRANSITION)
+            TrackTransitionMode.entries[(r.value as IntValue).value].description else r.desc
+        if (r.ctl == Ctl.TRANSITION) {
+            ui.wrap2(I18n.text(description), textW, 9.5f).forEachIndexed { index, line ->
+                ui.text(line, b.x, b.y + 24f + index * 12f, 9.5f, Theme.TEXT_TERTIARY)
+            }
+        } else if (description.isNotEmpty()) {
+            ui.text(ui.trim(I18n.text(description), textW, 9.5f), b.x, b.y + 24f, 9.5f, Theme.TEXT_TERTIARY)
+        }
         val cy = b.y + b.height / 2f
         val cx = b.right - ctlW
         when (r.ctl) {
@@ -644,6 +680,26 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
                 ui.toggleSwitch(LayoutBounds(cx, cy - 10f, 34f, 20f), v.get(), clip, key = v) { v.toggle() }
             }
             Ctl.SLIDER -> drawSlider(b, r, clip, cx, cy)
+            Ctl.NUMBER -> {
+                val value = r.value as IntValue
+                val box = LayoutBounds(cx, cy - 13f, ctlW, 26f)
+                ui.card(box, Theme.CARD, 7f)
+                for ((x, glyph, delta) in listOf(Triple(cx, "−", -1), Triple(box.right - 28f, "+", 1))) {
+                    val button = LayoutBounds(x, box.y, 28f, box.height)
+                    val enabled = value.value + delta in value.minRange..value.maxRange
+                    if (enabled && ui.hover(button)) ui.card(button, Theme.CARD_HOVER, 6f)
+                    ui.icon(glyph, button.x + 14f, cy, 12f, if (enabled) Theme.TEXT_PRIMARY else Theme.TEXT_TERTIARY)
+                    if (enabled) ui.hits += button.intersect(clip) to { value.setValue(value.value + delta) }
+                }
+                val input = LayoutBounds(cx + 30f, box.y, ctlW - 60f, box.height)
+                val text = if (editRow === r) editText + if (caretVisible()) "|" else "" else r.fmt(value)
+                if (editRow === r) {
+                    editRect = input
+                    ui.card(input, Theme.CARD_HOVER, 5f)
+                }
+                ui.text(ui.trim(text, input.width - 8f, 11f), input.x + 8f, cy - 5f, 11f, Theme.TEXT_PRIMARY)
+                ui.hits += input.intersect(clip) to { startEdit(r) }
+            }
             Ctl.KEY -> drawKeyButton(r.value as IntValue, clip, cx, cy)
             Ctl.COLOR -> {
                 // 颜色块 + 十六进制值，点一下弹出取色器
@@ -659,6 +715,24 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
                 ui.hits += hit to { if (picker === v) closePicker() else openPicker(v) }
             }
             Ctl.FONT -> drawFontPicker(r.value as FontChoice, clip, cx, cy)
+            Ctl.TRANSITION -> {
+                val value = r.value as IntValue
+                val box = LayoutBounds(cx, cy - 13f, ctlW, 26f)
+                ui.card(box, if (ui.hover(box) || transitionPicker === value) Theme.CARD_HOVER else Theme.CARD, 7f)
+                val label = I18n.text(TrackTransitionMode.entries[value.value].label)
+                ui.text(ui.trim(label, ctlW - 38f, 11f), box.x + 12f, cy - 5f, 11f, Theme.TEXT_PRIMARY)
+                ui.icon("▼", box.right - 14f, cy, 8f, Theme.TEXT_SECONDARY)
+                val hit = box.intersect(clip)
+                transitionHits += hit
+                if (transitionPicker === value) transitionAnchor = box
+                ui.hits += hit to {
+                    transitionPicker = if (transitionPicker === value) null else value
+                    transitionFocus = TrackTransitionMode.menuEntries.indexOf(TrackTransitionMode.entries[value.value])
+                    transitionAnchor = box
+                    closePicker()
+                    commitEdit()
+                }
+            }
             Ctl.CHOICE -> {
                 val v = r.value as IntValue
                 val labels = choiceLabels.getValue(r.key)
@@ -686,6 +760,42 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
                 }
             }
         }
+    }
+
+    private fun drawTransitionPicker(view: LayoutBounds) {
+        val value = transitionPicker ?: return
+        if (transitionAnchor.bottom < view.y || transitionAnchor.y > view.bottom) {
+            transitionPicker = null
+            return
+        }
+        val entries = TrackTransitionMode.menuEntries
+        val itemHeight = 30f
+        val height = entries.size * itemHeight + 12f
+        val width = minOf(190f, view.width)
+        val x = (transitionAnchor.right - width).coerceIn(view.x, max(view.x, view.right - width))
+        val below = transitionAnchor.bottom + 5f
+        val y = (if (below + height <= view.bottom) below else transitionAnchor.y - height - 5f)
+            .coerceIn(view.y, max(view.y, view.bottom - height))
+        val panel = LayoutBounds(x, y, width, height)
+        ui.ctx.drawShape(panel, ShapeStyle(Color(0.10f, 0.11f, 0.14f, 1f), 10f, 1f, Color(1f, 1f, 1f, 0.12f)))
+        val hits = mutableListOf<Hit>()
+        entries.forEachIndexed { index, mode ->
+            val box = LayoutBounds(x + 5f, y + 6f + index * itemHeight, width - 10f, itemHeight)
+            val selected = value.value == mode.ordinal
+            if (selected || ui.hover(box) || transitionFocus == index) {
+                ui.card(box, if (selected) RED.copy(a = 0.16f) else Theme.CARD_HOVER, 6f)
+            }
+            ui.text(I18n.text(mode.label), box.x + 10f, box.y + 9f, 11f,
+                if (selected) RED else Theme.TEXT_PRIMARY, Theme.FONT_MEDIUM)
+            if (selected) ui.icon("✓", box.right - 14f, box.y + itemHeight / 2f, 11f, RED)
+            hits += box to {
+                value.setValue(mode.ordinal)
+                transitionPicker = null
+            }
+        }
+        hits += panel to {}
+        for (hit in hits) transitionHits += hit.first
+        ui.hits.addAll(0, hits)
     }
 
     /** 选项按钮：◀ 当前选项 ▶，点箭头往前 / 往后切 */
@@ -828,6 +938,19 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
     /** 正在输入数值或录快捷键时的按键；返回 true 表示按键被吃掉了 */
     fun keyTyped(typedChar: Char, keyCode: Int): Boolean {
+        transitionPicker?.let { value ->
+            val entries = TrackTransitionMode.menuEntries
+            when (keyCode) {
+                Keys.ESCAPE -> transitionPicker = null
+                Keys.UP -> transitionFocus = Math.floorMod(transitionFocus - 1, entries.size)
+                Keys.DOWN -> transitionFocus = Math.floorMod(transitionFocus + 1, entries.size)
+                Keys.RETURN, Keys.NUMPADENTER -> {
+                    value.setValue(entries[transitionFocus].ordinal)
+                    transitionPicker = null
+                }
+            }
+            return true
+        }
         // 取色器里输入十六进制：Enter 确定，Esc 取消
         if (hexEditing) {
             when {

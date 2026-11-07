@@ -10,6 +10,18 @@ enum class TrackTransitionMode(val label: String, val nativeId: String) {
     NATURAL("Natural blend", "automix-basic"), RHYTHM("Rhythm blend", "automix-pro");
 
     val overlaps: Boolean get() = this != OFF && this != GAPLESS
+
+    val description: String get() = when (this) {
+        RHYTHM -> "Choose entry points from beats and sections and adjust the mix automatically"
+        NATURAL -> "Keep the original tempo and choose entry points and duration automatically"
+        FADE -> "Overlap for the selected duration while the previous track fades out and the next fades in"
+        GAPLESS -> "Skip leading and trailing silence and join the next track directly"
+        OFF -> "Keep complete track boundaries and switch after playback ends"
+    }
+
+    companion object {
+        val menuEntries = listOf(RHYTHM, NATURAL, FADE, GAPLESS, OFF)
+    }
 }
 
 internal object TrackTransition {

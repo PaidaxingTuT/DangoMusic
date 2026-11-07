@@ -344,6 +344,14 @@ Transition duration	过渡时长
 Target overlap for automatic track transitions	自动切歌时两首歌交叠的目标时长
 Fade duration	淡入淡出时长
 Overlap duration for Crossfade	淡入淡出模式中两首歌交叠的时长
+Adjust how long the two tracks overlap during Crossfade	调整两首歌交叠淡入淡出的时间
+Align beats	对齐节拍
+Adjust the outgoing tail to the next track's tempo; keep original speed when disabled	将当前歌曲尾声微调到下一首的速度，关闭时保持原速
+Choose entry points from beats and sections and adjust the mix automatically	结合节拍与段落选择衔接位置，自动调整混音
+Keep the original tempo and choose entry points and duration automatically	保持歌曲原速，自动选择衔接位置与时长
+Overlap for the selected duration while the previous track fades out and the next fades in	按设定时长交叠播放，前曲渐弱、后曲渐强
+Skip leading and trailing silence and join the next track directly	跳过首尾静音，直接衔接下一首
+Keep complete track boundaries and switch after playback ends	保留完整首尾，播放结束后切换下一首
 Blend on Next	下一首也使用过渡
 Use a short transition when you press Next	按下一首时使用短过渡
 Match tempo	节拍速度匹配

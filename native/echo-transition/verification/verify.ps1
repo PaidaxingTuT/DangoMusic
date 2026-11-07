@@ -6,7 +6,7 @@ New-Item -ItemType Directory -Path $fixtureDir | Out-Null
 Push-Location $repository
 try {
     $env:JAVA_HOME = $Jdk21
-    & ./modern/gradlew.bat -p common :core:classes --console=plain
+    & ./modern/gradlew.bat -p common :core:classes :ui:classes --console=plain
     if ($LASTEXITCODE -ne 0) { throw 'Shared core build failed' }
     & python (Join-Path $PSScriptRoot 'fixtures.py') $fixtureDir
     if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
@@ -20,8 +20,8 @@ try {
         "$cache/javazoom/jlayer/1.0.1", "$cache/org.jcraft/jorbis/0.0.17" -Filter '*.jar' -Recurse |
         Select-Object -ExpandProperty FullName
     $classpath = (@('common/core/build/classes/kotlin/main', 'common/core/build/classes/java/main',
-        'common/core/build/resources/main') + $jars) -join ';'
-    foreach ($check in @('EchoStrategyCheck.java', 'EchoPlaybackCheck.java')) {
+        'common/core/build/resources/main', 'common/ui/build/classes/kotlin/main') + $jars) -join ';'
+    foreach ($check in @('EchoStrategyCheck.java', 'EchoPlaybackCheck.java', 'TransitionSettingsCheck.java')) {
         & "$Jdk21/bin/java.exe" -cp $classpath (Join-Path $PSScriptRoot $check) $fixtureDir
         if ($LASTEXITCODE -ne 0) { throw "$check failed" }
     }
