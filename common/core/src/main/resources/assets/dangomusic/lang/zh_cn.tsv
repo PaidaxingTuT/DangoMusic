@@ -334,6 +334,8 @@ Preview only: membership is needed for the full song	仅试听片段：需要会
 The original was unavailable, playing another version	原版放不了，已换成其他版本
 Volume normalization	音量均衡
 Keep songs at a similar loudness	让不同的歌听起来差不多响
+Gapless playback	无缝播放
+Preload the next song and join compatible tracks in solo sequential playback	单人顺序播放时提前加载下一首，音频格式兼容时连续播放
 Could not add to Liked songs. Please retry.	没能加入"我喜欢"，请重试。
 Could not remove from Liked songs. Please retry.	没能取消红心，请重试。
 Show sound rays	显示声音射线

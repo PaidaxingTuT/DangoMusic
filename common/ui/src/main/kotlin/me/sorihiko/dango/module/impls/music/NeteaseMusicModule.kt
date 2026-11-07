@@ -119,6 +119,9 @@ class NeteaseMusicModule : Module() {
     @ModuleValue("Volume normalization", "Keep songs at a similar loudness")
     private val normalize = BooleanValue(true)
 
+    @ModuleValue("Gapless playback", "Preload the next song and join compatible tracks in solo sequential playback")
+    private val gapless = BooleanValue(false)
+
     @ModuleValue("Environment audio", "Echo follows the room you are in (size and materials), muffled underwater")
     private val envAudio = BooleanValue(true)
 
@@ -312,6 +315,7 @@ class NeteaseMusicModule : Module() {
         MusicPlayer.repeatOne = repeatOne.get()
 
         MusicPlayer.normalize = normalize.get()
+        MusicPlayer.gapless = gapless.get()
 
         // 环境音效：设置和玩家周围的环境交给解码线程
         EnvironmentAudio.enabled = envAudio.get()

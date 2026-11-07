@@ -3,7 +3,9 @@ package me.sorihiko.dango.music
 import me.sorihiko.dango.DangoLogger
 
 import java.util.Random
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.DataLine
@@ -33,6 +35,7 @@ object MusicPlayer {
     @Volatile var shuffle = false
     /** 歌曲自然播完时重播当前曲目；手动切歌仍按队列 / Shuffle 工作。 */
     @Volatile var repeatOne = false
+    @Volatile var gapless = false
     /** 0..1 */
     @Volatile var volume = 0.2f
 
@@ -45,6 +48,7 @@ object MusicPlayer {
         }
 
     private val loader = Executors.newSingleThreadExecutor { r -> Thread(r, "Dango-MusicLoader").apply { isDaemon = true } }
+    private val preloader = Executors.newSingleThreadExecutor { r -> Thread(r, "Dango-MusicPreloader").apply { isDaemon = true } }
     private val radioWorker = Executors.newSingleThreadExecutor { r -> Thread(r, "Dango-MusicRadio").apply { isDaemon = true } }
 
     /** 电台式的队列（私人 FM）：快放完时用它再要几首接在后面；普通歌单是 null */
@@ -58,6 +62,7 @@ object MusicPlayer {
     @Volatile private var line: AudioOutput? = null
     @Volatile private var seekBaseMs = 0L
     @Volatile private var pausedAtMs = 0L
+    @Volatile private var pauseRevision = 0
 
     val durationMs: Long get() = current?.durationMs ?: 0L
 
@@ -92,7 +97,7 @@ object MusicPlayer {
 
     val positionMs: Long
         get() = when (state) {
-            State.PLAYING -> seekBaseMs + (line?.positionMicros ?: 0L) / 1000
+            State.PLAYING -> (seekBaseMs + (line?.positionMicros ?: 0L) / 1000).coerceAtLeast(0L)
             State.PAUSED -> pausedAtMs
             else -> 0L
         }
@@ -273,7 +278,7 @@ object MusicPlayer {
         return r
     }
 
-    fun togglePause() {
+    @Synchronized fun togglePause() {
         if (lockedByHost()) return
         // 一起听的成员：本地先生效，再告诉房主
         if (party.canControl && (state == State.PLAYING || state == State.PAUSED)) {
@@ -282,6 +287,7 @@ object MusicPlayer {
         }
         when (state) {
             State.PLAYING -> {
+                pauseRevision++
                 pausedAtMs = positionMs
                 state = State.PAUSED
                 line?.stop()
@@ -328,42 +334,60 @@ object MusicPlayer {
 
     // ---------------------------------------------------------------- 加载 / 解码
 
+    private class LoadedTrack(val bytes: ByteArray, val durationMs: Long, val gain: Float, val message: String)
+    private class PreparedNext(val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack)
+
+    private fun loadTrack(track: NeteaseTrack, active: () -> Boolean): LoadedTrack {
+        val kugou = if (track.source == MusicSource.KUGOU) KugouMusicSource.loadAudio(track, active) else null
+        val url = if (track.source == MusicSource.KUGOU) kugou?.info else MusicSources.api(track.source).songUrl(track)
+        if (!active()) throw CancellationException()
+        if (url == null) throw SourceAccessException(if (track.source == MusicSource.NETEASE) "拿不到播放地址"
+            else if (NativeAccounts.get(track.source) != null) "No playable MP3. Your login may have expired, or this song is restricted by membership or region."
+            else "No guest MP3 available. Login, payment or regional restrictions may apply.")
+        val bytes = kugou?.bytes ?: if (track.source == MusicSource.NETEASE) NeteaseApi.request(url.url)
+            else SourceHttp.bytes(url.url, if (track.source == MusicSource.QQ) "https://y.qq.com/" else "https://m.kugou.com/")
+        if (!active()) throw CancellationException()
+        if (bytes == null || bytes.isEmpty() || (!track.cloud && bytes.size < 10_000)) {
+            throw SourceAccessException(if (track.source != MusicSource.NETEASE) "Unable to download this guest MP3. Try another song."
+                else if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
+        }
+        // Cloud list duration units are not reliable. Use compressed audio timing before enabling seeking.
+        val measuredDuration = if (track.cloud) AudioAnalysis.duration(bytes, active) else 0L
+        val measuredGain = if (normalize) AudioAnalysis.gain(bytes, active) else null
+        val gain = if (normalize) measuredGain ?: loudnessGain(url) else 1f
+        val message = when {
+            url.trialOnly -> "Preview only: membership is needed for the full song"
+            url.replaced -> "The original was unavailable, playing another version"
+            else -> ""
+        }
+        DangoLogger.info("Audio analysis: source={} cloud={} durationMs={} localGain={} appliedGain={}",
+            track.source.key, track.cloud, measuredDuration, measuredGain != null, gain)
+        return LoadedTrack(bytes, measuredDuration, gain, message)
+    }
+
+    private fun applyLoaded(track: NeteaseTrack, loaded: LoadedTrack) {
+        if (loaded.durationMs > 0) track.durationMs = loaded.durationMs
+        audio = loaded.bytes
+        message = loaded.message
+        trackGain = loaded.gain
+    }
+
+    private fun canPlayGaplessly() = gapless && !shuffle && !repeatOne && radio == null && !followMode &&
+        party.role == me.sorihiko.dango.party.ListenParty.Role.NONE
+
     private fun load(gen: Int, track: NeteaseTrack, startAt: (() -> Long)? = null, paused: Boolean = false) {
         try {
-            val kugou = if (track.source == MusicSource.KUGOU) KugouMusicSource.loadAudio(track) { gen == generation } else null
-            val url = if (track.source == MusicSource.KUGOU) kugou?.info else MusicSources.api(track.source).songUrl(track)
+            val loaded = loadTrack(track) { gen == generation }
             if (gen != generation) return
-            if (url == null) return fail(gen, if (track.source == MusicSource.NETEASE) "拿不到播放地址"
-                else if (NativeAccounts.get(track.source) != null) "No playable MP3. Your login may have expired, or this song is restricted by membership or region."
-                else "No guest MP3 available. Login, payment or regional restrictions may apply.")
-            val bytes = kugou?.bytes ?: if (track.source == MusicSource.NETEASE) NeteaseApi.request(url.url)
-                else SourceHttp.bytes(url.url, if (track.source == MusicSource.QQ) "https://y.qq.com/" else "https://m.kugou.com/")
-            if (gen != generation) return
-            if (bytes == null || bytes.isEmpty() || (!track.cloud && bytes.size < 10_000)) {
-                return fail(gen, if (track.source != MusicSource.NETEASE) "Unable to download this guest MP3. Try another song."
-                    else if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
-            }
-            // Cloud list duration units are not reliable. Use compressed audio timing before enabling seeking.
-            val measuredDuration = if (track.cloud) AudioAnalysis.duration(bytes) { gen == generation } else 0L
-            val measuredGain = if (normalize) AudioAnalysis.gain(bytes) { gen == generation } else null
-            if (gen != generation) return
-            if (measuredDuration > 0) track.durationMs = measuredDuration
-            audio = bytes
-            message = when {
-                url.trialOnly -> "Preview only: membership is needed for the full song"
-                url.replaced -> "The original was unavailable, playing another version"
-                else -> ""
-            }
-            trackGain = if (normalize) measuredGain ?: loudnessGain(url) else 1f
-            DangoLogger.info("Audio analysis: source={} cloud={} durationMs={} localGain={} appliedGain={}",
-                track.source.key, track.cloud, measuredDuration, measuredGain != null, trackGain)
+            applyLoaded(track, loaded)
             val start = (startAt?.invoke() ?: 0L).coerceIn(0L, max(0L, track.durationMs - 1000))
             if (paused) {
                 pausedAtMs = start
                 state = State.PAUSED
             }
-            startDecode(gen, bytes, start)
+            startDecode(gen, loaded.bytes, start)
         } catch (e: Throwable) {
+            if (gen != generation) return
             // 包括 NoClassDefFoundError 之类的 Error：不接住的话线程会悄悄退出，界面一直停在"加载中"
             if (track.source == MusicSource.NETEASE) {
                 DangoLogger.warn("Music load failed: {}", e.javaClass.simpleName)
@@ -526,10 +550,29 @@ object MusicPlayer {
         var out: AudioOutput? = null
         var finished = false
         var source: AudioDecoder? = null
+        var prefetch: Future<PreparedNext>? = null
+        var handoff: PreparedNext? = null
+        var boundaryMicros = 0L
+        var incomingStartMs = 0L
+
+        fun publishHandoff(positionMicros: Long) {
+            val next = handoff ?: return
+            synchronized(this) {
+                if (gen != generation) return
+                seekBaseMs = incomingStartMs - boundaryMicros / 1000
+                if (state == State.PAUSED) pausedAtMs = seekBaseMs + positionMicros / 1000
+                applyLoaded(next.track, next.loaded)
+                index = next.index
+                current = next.track
+                failedTracks.clear()
+                clearBeats()
+                handoff = null
+            }
+        }
+
         try {
             val started = AudioDecoder.start(bytes, startMs) { gen == generation }
-            val decoder = started.decoder
-            source = decoder
+            source = started.decoder
             val skipped = started.skippedMs
             val first = started.first
             if (gen != generation) return
@@ -542,17 +585,46 @@ object MusicPlayer {
             var lastBeatMs = -1000f
 
             var appliedVolume = -1f
+            var outputRate = 0
+            var outputChannels = 0
+            var writtenFrames = 0L
+            var outputPauseRevision = pauseRevision
             var pending = first
             while (gen == generation) {
-                val frame = pending ?: decoder.read()
+                val frame = pending ?: source!!.read()
                 pending = null
                 if (frame == null) {
+                    val next = prefetch?.takeIf { it.isDone }?.let { runCatching { it.get() }.getOrNull() }
+                    // Java Sound can accept only part of a write when paused, making the boundary uncertain.
+                    if (next != null && out != null && !out.lost && outputPauseRevision == pauseRevision && canPlayGaplessly() &&
+                        next.index == index + 1 && queue.getOrNull(next.index) === next.track && gen == generation) {
+                        val incoming = runCatching { AudioDecoder.start(next.loaded.bytes, 0L) { gen == generation } }.getOrNull()
+                        val head = incoming?.first
+                        if (head != null && head.rate == outputRate && head.channels == outputChannels) {
+                            try { source?.close() } catch (_: Exception) {}
+                            source = incoming.decoder
+                            pending = head
+                            handoff = next
+                            boundaryMicros = writtenFrames * 1_000_000L / outputRate
+                            incomingStartMs = 0L
+                            decodedMs = 0f
+                            lowPass = 0f
+                            avgEnergy = 0f
+                            lastBeatMs = -1000f
+                            prefetch = null
+                            continue
+                        }
+                        try { incoming?.decoder?.close() } catch (_: Exception) {}
+                    }
                     finished = true
                     break
                 }
                 if (out == null) {
                     val format = AudioFormat(frame.rate.toFloat(), 16, frame.channels, true, false)
                     out = openOutput(format, frame.rate * frame.channels * 2 / 4)   // 约 0.25 秒缓冲
+                    outputRate = frame.rate
+                    outputChannels = frame.channels
+                    outputPauseRevision = pauseRevision
                     line = out
                     if (state == State.PAUSED) {
                         out.stop()
@@ -569,6 +641,18 @@ object MusicPlayer {
                     Thread.sleep(15)
                 }
                 if (gen != generation) break
+                // 只准备队列里紧接着的一首，下载慢时到 EOF 仍照常切歌。
+                if (prefetch == null && handoff == null && outputPauseRevision == pauseRevision &&
+                    canPlayGaplessly() && durationMs - decodedMs <= 30_000f) {
+                    val nextIndex = index + 1
+                    queue.getOrNull(nextIndex)?.let { track ->
+                        prefetch = preloader.submit<PreparedNext> {
+                            val active = { gen == generation && !Thread.currentThread().isInterrupted }
+                            if (!active()) throw CancellationException()
+                            PreparedNext(nextIndex, track, loadTrack(track, active))
+                        }
+                    }
+                }
                 if (volume != appliedVolume) {
                     out.setVolume(volume)
                     appliedVolume = volume
@@ -590,7 +674,7 @@ object MusicPlayer {
                     k += ch
                 }
                 energy /= (len / ch).coerceAtLeast(1)
-                if (avgEnergy > 0f && energy > avgEnergy * 1.7f && energy > 2e-4f && decodedMs - lastBeatMs > 170f) {
+                if (handoff == null && avgEnergy > 0f && energy > avgEnergy * 1.7f && energy > 2e-4f && decodedMs - lastBeatMs > 170f) {
                     val strength = ((energy / avgEnergy - 1.7f) / 2f + 0.45f).coerceIn(0f, 1f)
                     synchronized(beats) {
                         beats.addLast(Beat(decodedMs.toLong(), strength))
@@ -601,7 +685,7 @@ object MusicPlayer {
                 avgEnergy = if (avgEnergy == 0f) energy else avgEnergy + (energy - avgEnergy) * (frameMs / 1000f).coerceAtMost(1f)
                 decodedMs += frameMs
                 // 音量均衡、环境音效（水下变闷、洞穴回声……）在鼓点检测之后加，不影响节奏判断
-                val gain = trackGain
+                val gain = handoff?.loaded?.gain ?: trackGain
                 if (gain != 1f) for (idx in 0 until len) pcm[idx] = (pcm[idx] * gain).toInt().coerceIn(-32768, 32767).toShort()
                 EnvironmentAudio.process(pcm, len, ch, frame.rate, frameMs)
                 val data = ByteArray(len * 2)
@@ -617,12 +701,28 @@ object MusicPlayer {
                     // 游戏重启了声音系统：换一个新的输出，从这一块接着放（缓冲里没放完的零点几秒丢掉）
                     val reopened = reopenOutput(gen, out, frame.rate, frame.channels) ?: throw e
                     out = reopened
-                    seekBaseMs = (decodedMs - frameMs).toLong()
+                    outputRate = frame.rate
+                    outputChannels = frame.channels
+                    writtenFrames = 0L
+                    outputPauseRevision = pauseRevision
+                    val frameStartMs = (decodedMs - frameMs).toLong()
+                    if (handoff == null) {
+                        seekBaseMs = frameStartMs
+                    } else {
+                        boundaryMicros = 0L
+                        incomingStartMs = frameStartMs
+                    }
                     appliedVolume = -1f
                     if (reopened.lost) throw e
                     reopened.setVolume(volume)
                     appliedVolume = volume
                     reopened.write(data, 0, data.size)
+                }
+                writtenFrames += len / outputChannels
+                // 写进缓冲的 PCM 还没出声，等输出时钟到达两首歌的交界再更新歌词。
+                if (handoff != null) {
+                    val position = out.positionMicros
+                    if (position >= boundaryMicros) publishHandoff(position)
                 }
             }
             if (finished && out == null && gen == generation) {
@@ -632,24 +732,28 @@ object MusicPlayer {
             if (finished && gen == generation) {
                 // 最后一点正在放的时候声音系统重启了：就当放完了
                 try { out?.drain() } catch (e: Throwable) { if (out?.lost != true) throw e }
+                if (handoff != null && out?.lost == false) publishHandoff(out.positionMicros)
                 synchronized(this) { if (gen == generation) failedTracks.clear() }
             }
         } catch (e: Throwable) {
             finished = false
             DangoLogger.warn("Music decode failed: {}", e.toString())
             if (gen == generation) {
+                if (handoff != null) publishHandoff(boundaryMicros)
                 fail(gen, "播放失败：" + describe(e))
             }
         } finally {
+            prefetch?.cancel(true)
             try { source?.close() } catch (_: Exception) {}
-            if (line === out) line = null
+            synchronized(this) { if (line === out) line = null }
             try {
                 out?.stop()
                 out?.close()
             } catch (_: Exception) {
             }
         }
-        if (finished && gen == generation) {
+        if (finished) synchronized(this) {
+            if (gen != generation) return
             if (followMode) {
                 // 跟随房主时放完就停在结尾，等房主切下一首
                 pausedAtMs = durationMs
