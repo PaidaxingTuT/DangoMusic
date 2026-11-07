@@ -126,14 +126,14 @@ class NeteaseMusicModule : Module() {
     @ModuleValue("Track transition", "Blend tracks in solo playback")
     private val trackTransition = IntValue(0, TrackTransitionMode.entries.lastIndex, TrackTransitionMode.OFF.ordinal)
 
-    @ModuleValue("Transition duration", "Target overlap for automatic track transitions")
-    private val transitionSeconds = IntValue(2, 15, 7)
+    @ModuleValue("Fade duration", "Overlap duration for Crossfade")
+    private val transitionSeconds = IntValue(0, 15, 15)
 
     @ModuleValue("Blend on Next", "Use a short transition when you press Next")
     private val transitionOnNext = BooleanValue(true)
 
     @ModuleValue("Match tempo", "Align nearby tempos in Rhythm blend while preserving pitch")
-    private val transitionTempoMatch = BooleanValue(true)
+    private val transitionTempoMatch = BooleanValue(false)
 
     @ModuleValue("Environment audio", "Echo follows the room you are in (size and materials), muffled underwater")
     private val envAudio = BooleanValue(true)

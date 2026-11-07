@@ -36,9 +36,10 @@ object MusicPlayer {
     /** 歌曲自然播完时重播当前曲目；手动切歌仍按队列 / Shuffle 工作。 */
     @Volatile var repeatOne = false
     @Volatile var transitionMode = TrackTransitionMode.OFF
-    @Volatile var transitionSeconds = 7
+    @Volatile var transitionSeconds = 15
     @Volatile var transitionOnNext = true
-    @Volatile var transitionTempoMatch = true
+    @Volatile var transitionTempoMatch = false
+    val transitionEngineAvailable: Boolean get() = EchoTransitionNative.available
     /** 0..1 */
     @Volatile var volume = 0.2f
 
@@ -383,7 +384,26 @@ object MusicPlayer {
     private class PreparedNext(
         val from: NeteaseTrack, val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack,
         val mode: TrackTransitionMode, val seconds: Int, val matchTempo: Boolean, val plan: TrackTransition.Plan?,
-    )
+    ) {
+        private var ready: AudioDecoder.Started? = null
+
+        @Synchronized fun prepare(active: () -> Boolean) {
+            ready = TrackBlend.openIncoming(loaded.bytes, plan?.entryMs ?: 0L, active)
+        }
+
+        @Synchronized fun open(cueMs: Long, active: () -> Boolean): AudioDecoder.Started {
+            val cached = ready
+            ready = null
+            if (cached != null && cueMs == (plan?.entryMs ?: 0L)) return cached
+            try { cached?.decoder?.close() } catch (_: Exception) {}
+            return TrackBlend.openIncoming(loaded.bytes, cueMs, active)
+        }
+
+        @Synchronized fun close() {
+            try { ready?.decoder?.close() } catch (_: Exception) {}
+            ready = null
+        }
+    }
 
     private fun loadTrack(track: NeteaseTrack, active: () -> Boolean): LoadedTrack {
         val kugou = if (track.source == MusicSource.KUGOU) KugouMusicSource.loadAudio(track, active) else null
@@ -420,11 +440,12 @@ object MusicPlayer {
         trackGain = loaded.gain
     }
 
-    private fun canTransition(manual: Boolean = false) = transitionMode != TrackTransitionMode.OFF &&
+    private fun canTransition(manual: Boolean = false) = transitionMode != TrackTransitionMode.OFF && EchoTransitionNative.available &&
         (manual || !repeatOne) && !followMode &&
         party.role == me.sorihiko.dango.party.ListenParty.Role.NONE
 
     private fun clearTransition() {
+        preparedForSeek?.close()
         preparedForSeek = null
         manualNext = null
         shuffleNext = null
@@ -693,10 +714,16 @@ object MusicPlayer {
             var outputRate = 0
             var outputChannels = 0
             var writtenFrames = 0L
+            val history = java.util.ArrayDeque<ShortArray>()
+            var historySamples = 0
             var pending = first
             while (gen == generation) {
                 (source as? TrackBlend)?.finish()?.let { source = it }
-                val frame = pending ?: source!!.read()
+                var frame = pending ?: source!!.read()
+                if (frame == null && source is TrackBlend) {
+                    (source as TrackBlend).finish()?.let { source = it }
+                    frame = source!!.read()
+                }
                 pending = null
                 if (prepareMode != transitionMode || prepareSeconds != transitionSeconds ||
                     prepareTempo != transitionTempoMatch || prepareShuffle != shuffle) {
@@ -716,10 +743,25 @@ object MusicPlayer {
                         null
                     }
                     prepared = result
-                    synchronized(this) { if (gen == generation) preparedForSeek = result }
+                    synchronized(this) {
+                        if (gen == generation) preparedForSeek = result else result?.close()
+                    }
                     prefetch = null
                 }
                 val next = prepared
+                // Match the original engine's sample boundary, rather than starting at the next whole codec frame.
+                if (frame != null && source !is TrackBlend && manualNext == null) {
+                    val cut = next?.plan?.exitMs
+                    if (cut != null && cut > decodedMs && cut < decodedMs + frame.durationMs) {
+                        val samples = kotlin.math.ceil((cut - decodedMs).toDouble() * frame.rate / 1000).toInt() * frame.channels
+                        if (samples in frame.channels until frame.length) {
+                            val tail = frame.samples.copyOfRange(samples, frame.length)
+                            pending = AudioDecoder.Frame(tail, tail.size, frame.rate, frame.channels)
+                            val head = frame.samples.copyOfRange(0, samples)
+                            frame = AudioDecoder.Frame(head, head.size, frame.rate, frame.channels)
+                        }
+                    }
+                }
                 val manual = manualNext?.takeIf { it.generation == gen && handoff == null }
                 if (manual != null && (!canTransition(manual = true) || !transitionOnNext ||
                         !transitionMode.overlaps || System.nanoTime() >= manual.deadline)) {
@@ -740,7 +782,7 @@ object MusicPlayer {
                         next.index == nextTransitionIndex() && queue.getOrNull(next.index) === next.track && gen == generation) {
                         val cue = blend?.entryMs ?: 0L
                         val incoming = runCatching {
-                            TrackBlend.openIncoming(next.loaded.bytes, cue) { gen == generation }
+                            next.open(cue) { gen == generation }
                         }.getOrNull()
                         val inputHead = incoming?.first
                         val inputDecoder = incoming?.decoder
@@ -756,22 +798,28 @@ object MusicPlayer {
                         }
                         if (incoming != null && decoder != null && head != null &&
                             (frame == null || (frame.rate == outputRate && frame.channels == outputChannels))) {
-                            if (frame == null) {
+                            if (frame == null || blend?.overlapMs == 0L) {
                                 try { source?.close() } catch (_: Exception) {}
                                 source = decoder
                                 pending = head
                             } else if (blend != null) {
+                                val preroll = FloatArray(historySamples)
+                                var offset = 0
+                                for (block in history) for (sample in block) preroll[offset++] = sample / 32768f
                                 source = TrackBlend(source!!, frame, decoder, head,
-                                    blend.overlapMs, trackGain, next.loaded.gain, blend.bassExchange, blend.speed)
+                                    blend, trackGain, next.loaded.gain, preroll)
                             }
                             handoff = next
                             handoffPlan = blend
                             boundaryMicros = writtenFrames * 1_000_000L / outputRate
                             decodedMs = incoming.skippedMs
                             incomingStartMs = decodedMs.toLong()
-                            DangoLogger.info("Dango Music transition queued: mode={} actual={} overlapMs={} incomingMs={} speed={} manual={} converted={}",
+                            DangoLogger.info("Dango Music transition queued: mode={} actual={} overlapMs={} incomingMs={} speed={} manual={} converted={} template={} reason={}",
                                 next.mode, blend?.mode ?: TrackTransitionMode.GAPLESS, blend?.overlapMs ?: 0L,
-                                incomingStartMs, blend?.speed ?: 1.0, manual != null, inputHead !== head)
+                                incomingStartMs, blend?.speed ?: 1.0, manual != null, inputHead !== head,
+                                blend?.template ?: "none", blend?.note ?: "EOF handoff")
+                            history.clear()
+                            historySamples = 0
                             lowPass = 0f
                             avgEnergy = 0f
                             lastBeatMs = -1000f
@@ -814,9 +862,9 @@ object MusicPlayer {
                     Thread.sleep(15)
                 }
                 if (gen != generation) break
-                // 只准备队列里紧接着的一首，下载慢时到 EOF 仍照常切歌。
+                // EchoMusic's preparation windows leave time for both network reads and musical analysis.
                 if (!requested && handoff == null && canTransition(manual = manual != null) &&
-                    (prepareMode != TrackTransitionMode.GAPLESS || durationMs - decodedMs <= 30_000f)) {
+                    (manual != null || durationMs - decodedMs <= TrackTransition.prefetchMs(prepareMode, prepareSeconds))) {
                     val nextIndex = nextTransitionIndex()
                     val from = current
                     val track = queue.getOrNull(nextIndex)
@@ -835,7 +883,15 @@ object MusicPlayer {
                                 TrackTransition.plan(mode, outgoing, loaded.bytes, outgoingMs,
                                     loaded.durationMs.takeIf { it > 0 } ?: track.durationMs, active, seconds, matchTempo)
                             }.getOrNull()
-                            PreparedNext(from, nextIndex, track, loaded, mode, seconds, matchTempo, plan)
+                            val result = PreparedNext(from, nextIndex, track, loaded, mode, seconds, matchTempo, plan)
+                            try {
+                                result.prepare(active)
+                                if (!active()) throw CancellationException()
+                                result
+                            } catch (e: Throwable) {
+                                result.close()
+                                throw e
+                            }
                         }
                     }
                 }
@@ -845,6 +901,14 @@ object MusicPlayer {
                 }
                 val len = frame.length
                 val pcm = frame.samples
+                if (transitionMode.overlaps && source !is TrackBlend) {
+                    val block = pcm.copyOf(len)
+                    history.addLast(block)
+                    historySamples += block.size
+                    while (historySamples > frame.rate * frame.channels * 2 && history.size > 1) {
+                        historySamples -= history.removeFirst().size
+                    }
+                }
 
                 // 鼓点：低频（底鼓）能量比最近一秒的平均值突然高出很多
                 val frameMs = frame.durationMs
@@ -929,7 +993,11 @@ object MusicPlayer {
                 fail(gen, "播放失败：" + describe(e))
             }
         } finally {
+            prefetch?.takeIf { it.isDone && !it.isCancelled }?.let {
+                runCatching { it.get() }.getOrNull()?.close()
+            }
             prefetch?.cancel(true)
+            if (prepared !== preparedForSeek) prepared?.close()
             try { source?.close() } catch (_: Exception) {}
             synchronized(this) { if (line === out) line = null }
             try {

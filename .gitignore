@@ -42,3 +42,6 @@ docs/ISSUE-36-PLAYBACK.md
 docs/ISSUE-KUGOU-PLAYBACK.md
 docs/NETEASE-CLOUD-BETA.md
 docs/OGG-AUDIO.md
+
+# Native EchoMusic transition build outputs
+/native/echo-transition/target/

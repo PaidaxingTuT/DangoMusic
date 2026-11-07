@@ -1,0 +1,14 @@
+[package]
+name = "dango-echo-transition"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dango_echo_transition"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+soundtouch-rs = { path = "vendor/soundtouch-rs" }

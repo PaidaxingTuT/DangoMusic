@@ -339,8 +339,11 @@ Preload the next song and join compatible tracks in solo sequential playback	单
 Track transition	歌曲过渡
 Transition between compatible tracks in solo sequential playback	单人顺序播放时，为音频格式兼容的歌曲应用过渡
 Blend tracks in solo playback	过渡混合相邻曲目
+EchoMusic transition engine unavailable in this build	此构建未提供 EchoMusic 过渡引擎
 Transition duration	过渡时长
 Target overlap for automatic track transitions	自动切歌时两首歌交叠的目标时长
+Fade duration	淡入淡出时长
+Overlap duration for Crossfade	淡入淡出模式中两首歌交叠的时长
 Blend on Next	下一首也使用过渡
 Use a short transition when you press Next	按下一首时使用短过渡
 Match tempo	节拍速度匹配

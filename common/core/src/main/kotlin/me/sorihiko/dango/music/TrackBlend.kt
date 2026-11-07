@@ -1,95 +1,112 @@
 package me.sorihiko.dango.music
 
 import java.util.concurrent.CancellationException
-import kotlin.math.abs
-import kotlin.math.exp
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
-/** Feeds one PCM stream to the existing output while two compatible decoders overlap. */
-internal class TrackBlend @JvmOverloads constructor(
-    outgoing: AudioDecoder,
+/** Streams the original EchoMusic two-deck mixer, including template automation and effect tails. */
+internal class TrackBlend(
+    private val outgoing: AudioDecoder,
     outgoingHead: AudioDecoder.Frame,
     private val incoming: AudioDecoder,
     incomingHead: AudioDecoder.Frame,
-    overlapMs: Long,
-    private val outgoingGain: Float,
-    private val incomingGain: Float,
-    private val bassExchange: Boolean,
-    speed: Double = 1.0,
+    plan: TrackTransition.Plan,
+    outgoingGain: Float,
+    incomingGain: Float,
+    preroll: FloatArray,
 ) : AudioDecoder {
     private val rate = incomingHead.rate
     private val channels = incomingHead.channels
-    private val overlapFrames = (overlapMs * rate / 1000).coerceAtLeast(1)
-    private var endFrame = overlapFrames
-    private var mixedFrames = 0L
-    private val outgoing = if (speed == 1.0) outgoing else TempoStretch(outgoing, outgoingHead, speed)
-    private var a: AudioDecoder.Frame? = outgoingHead.takeIf { speed == 1.0 }
-    private var aOffset = 0
-    private var aEndedAt = -1L
-    private var b: AudioDecoder.Frame? = incomingHead
-    private val lowPass = (1.0 - exp(-2.0 * Math.PI * 180 / rate)).toFloat()
-    private val lowA = FloatArray(channels)
-    private val lowB = FloatArray(channels)
+    private var handle = EchoTransitionNative.createMixer(plan.json, rate, channels, outgoingGain, incomingGain)
+    private var pendingA: AudioDecoder.Frame? = outgoingHead
+    private var pendingB: AudioDecoder.Frame? = incomingHead
+    private var remainingA = ((plan.endMs - plan.exitMs).coerceAtLeast(0L) * rate / 1000) * channels
+    private var endedA = false
+    private var endedB = false
+    private var released = false
+    private var restored: AudioDecoder? = null
+
+    init {
+        val wanted = (EchoTransitionNative.info(handle) shr 34 and 65535).toInt() * channels
+        if (wanted > 0 && preroll.isNotEmpty()) {
+            EchoTransitionNative.preroll(handle, preroll.copyOfRange((preroll.size - wanted).coerceAtLeast(0), preroll.size))
+        }
+    }
 
     override fun read(): AudioDecoder.Frame? {
-        val frame = b ?: incoming.read() ?: return null
-        b = null
-        check(frame.rate == rate && frame.channels == channels) { "Incoming audio format changed during transition" }
-        val mixed = ShortArray(frame.length)
-        val sum = FloatArray(channels)
-        for (i in mixed.indices step channels) {
-            if (mixedFrames < endFrame && aEndedAt < 0 && (a == null || aOffset == a?.length)) {
-                a = outgoing.read()?.takeIf { it.rate == rate && it.channels == channels }
-                aOffset = 0
-                if (a == null) {
-                    aEndedAt = mixedFrames
-                    endFrame = minOf(endFrame, mixedFrames + (rate * 120L / 1000).coerceAtLeast(1))
+        check(!released)
+        while (true) {
+            val info = EchoTransitionNative.info(handle)
+            if (info and 1L != 0L) return null
+            if (!endedA && (info shr 2 and 65535) < 4096) {
+                val frame = if (remainingA <= 0) null else pendingA ?: try {
+                    outgoing.read()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                pendingA = null
+                if (frame == null) {
+                    EchoTransitionNative.push(handle, 0, null)
+                    endedA = true
+                } else {
+                    check(frame.rate == rate && frame.channels == channels)
+                    val length = minOf(frame.length.toLong(), remainingA).toInt()
+                    EchoTransitionNative.push(handle, 0, FloatArray(length) { frame.samples[it] / 32768f })
+                    remainingA -= length
                 }
             }
-            val old = if (mixedFrames < endFrame) a else null
-            val progress = when {
-                mixedFrames >= endFrame -> 1f
-                aEndedAt < 0 -> (mixedFrames + 1f) / overlapFrames
-                else -> {
-                    val start = aEndedAt.toFloat() / overlapFrames
-                    start + (1f - start) * (mixedFrames - aEndedAt + 1f) / (endFrame - aEndedAt)
+            if (!endedB && (info shr 18 and 65535) < 4096) {
+                val frame = pendingB ?: incoming.read()
+                pendingB = null
+                if (frame == null) {
+                    EchoTransitionNative.push(handle, 1, null)
+                    endedB = true
+                } else {
+                    check(frame.rate == rate && frame.channels == channels)
+                    EchoTransitionNative.push(handle, 1, FloatArray(frame.length) { frame.samples[it] / 32768f })
                 }
             }
-            val gainA = sqrt(1f - progress)
-            val gainB = sqrt(progress)
-            val headroom = 1f - 0.56f * progress * (1f - progress)
-            var peak = 32767f
-            for (channel in 0 until channels) {
-                var sampleA = if (old == null) 0f else old.samples[aOffset + channel] * outgoingGain
-                var sampleB = frame.samples[i + channel] * incomingGain
-                if (bassExchange && old != null) {
-                    lowA[channel] += (sampleA - lowA[channel]) * lowPass
-                    lowB[channel] += (sampleB - lowB[channel]) * lowPass
-                    sampleA -= lowA[channel] * (2f * progress - 1f).coerceAtLeast(0f)
-                    sampleB -= lowB[channel] * (1f - 2f * progress).coerceAtLeast(0f)
-                }
-                sum[channel] = (sampleA * gainA + sampleB * gainB) * headroom
-                peak = maxOf(peak, abs(sum[channel]))
-            }
-            val limiter = 32767f / peak
-            for (channel in 0 until channels) {
-                mixed[i + channel] = (sum[channel] * limiter).roundToInt().coerceIn(-32768, 32767).toShort()
-            }
-            if (old != null) aOffset += channels
-            mixedFrames++
+            val samples = EchoTransitionNative.render(handle, 2048)
+            if (samples.isNotEmpty()) return pcm(samples)
+            if (endedA && endedB) return null
         }
-        return AudioDecoder.Frame(mixed, mixed.size, rate, channels)
     }
 
     fun finish(): AudioDecoder? {
-        if (mixedFrames < endFrame) return null
+        restored?.let { return it }
+        if (EchoTransitionNative.info(handle) and 1L == 0L) return null
+        val remaining = EchoTransitionNative.remainder(handle)
+        EchoTransitionNative.release(handle)
+        released = true
         try { outgoing.close() } catch (_: Exception) {}
-        return incoming
+        val head = if (remaining.isEmpty()) null else pcm(remaining)
+        return object : AudioDecoder {
+            private var pending = head
+            override fun read(): AudioDecoder.Frame? {
+                val frame = pending
+                pending = null
+                return frame ?: incoming.read()
+            }
+            override fun close() = incoming.close()
+        }.also { restored = it }
+    }
+
+    private fun pcm(samples: FloatArray): AudioDecoder.Frame {
+        val shorts = ShortArray(samples.size) {
+            (samples[it] * 32768f).roundToInt().coerceIn(-32768, 32767).toShort()
+        }
+        return AudioDecoder.Frame(shorts, shorts.size, rate, channels)
     }
 
     override fun close() {
-        try { outgoing.close() } finally { incoming.close() }
+        if (!released) {
+            EchoTransitionNative.release(handle)
+            released = true
+            try { outgoing.close() } finally { incoming.close() }
+        } else {
+            restored?.close()
+        }
     }
 
     companion object {
