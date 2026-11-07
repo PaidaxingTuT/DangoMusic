@@ -36,6 +36,9 @@ object MusicPlayer {
     /** 歌曲自然播完时重播当前曲目；手动切歌仍按队列 / Shuffle 工作。 */
     @Volatile var repeatOne = false
     @Volatile var transitionMode = TrackTransitionMode.OFF
+    @Volatile var transitionSeconds = 7
+    @Volatile var transitionOnNext = true
+    @Volatile var transitionTempoMatch = true
     /** 0..1 */
     @Volatile var volume = 0.2f
 
@@ -63,6 +66,15 @@ object MusicPlayer {
     @Volatile private var seekBaseMs = 0L
     @Volatile private var pausedAtMs = 0L
     @Volatile private var preparedForSeek: PreparedNext? = null
+    @Volatile private var manualNext: ManualNext? = null
+    private var shuffleNext: ShuffleNext? = null
+    @Volatile var lastTransition: TransitionResult? = null
+        private set
+    val transitionPending: Boolean get() = manualNext != null
+
+    data class TransitionResult(val mode: TrackTransitionMode, val overlapMs: Long, val speed: Double, val atNanos: Long)
+    private class ManualNext(val generation: Int, val index: Int, val deadline: Long)
+    private class ShuffleNext(val from: NeteaseTrack, val index: Int, val track: NeteaseTrack)
 
     val durationMs: Long get() = current?.durationMs ?: 0L
 
@@ -156,7 +168,7 @@ object MusicPlayer {
         index = idx
         val gen = ++generation
         stopLine()
-        preparedForSeek = null
+        clearTransition()
         audio = null
         current = track
         state = State.LOADING
@@ -219,7 +231,7 @@ object MusicPlayer {
         index = 0
         val gen = ++generation
         stopLine()
-        preparedForSeek = null
+        clearTransition()
         audio = null
         current = track
         state = State.LOADING
@@ -250,11 +262,31 @@ object MusicPlayer {
         startDecode(gen, bytes, target)
     }
 
-    fun next() {
+    @Synchronized fun next() {
+        if (lockedByHost()) return
+        if (party.canControl) return party.requestNext()
+        if (transitionOnNext && transitionMode.overlaps && state == State.PLAYING && line != null &&
+            canTransition(manual = true) && manualNext == null) {
+            val target = nextTransitionIndex()
+            if (target >= 0) {
+                manualNext = ManualNext(generation, target, System.nanoTime() + 3_000_000_000L)
+                return
+            }
+        }
+        advanceQueue()
+    }
+
+    private fun advanceQueue() {
         if (lockedByHost()) return
         if (party.canControl) return party.requestNext()
         val q = queue
         if (q.isEmpty()) return
+        val planned = manualNext?.takeIf { it.generation == generation }?.index
+            ?: if (canTransition()) nextTransitionIndex() else -1
+        if (planned in q.indices) {
+            playIndex(planned)
+            return
+        }
         // 电台按顺序往下放；放到最后一首时先要几首新的再切
         if (radio != null) {
             if (index + 1 < q.size) playIndex(index + 1)
@@ -262,6 +294,15 @@ object MusicPlayer {
             return
         }
         playIndex(if (shuffle && q.size > 1) pickRandom(q.size) else index + 1)
+    }
+
+    private fun advanceWithTransitionFallback() {
+        val showFallback = manualNext != null || (canTransition() && nextTransitionIndex() >= 0)
+        val previousGeneration = generation
+        advanceQueue()
+        if (showFallback && generation != previousGeneration) {
+            lastTransition = TransitionResult(TrackTransitionMode.OFF, 0L, 1.0, System.nanoTime())
+        }
     }
 
     fun prev() {
@@ -320,6 +361,8 @@ object MusicPlayer {
         // 暂停时拖动：停在新位置，仍保持暂停
         if (state == State.PAUSED) pausedAtMs = target
         val gen = ++generation
+        manualNext = null
+        lastTransition = null
         stopLine()
         startDecode(gen, bytes, target)
     }
@@ -327,7 +370,7 @@ object MusicPlayer {
     @Synchronized fun stop() {
         ++generation
         stopLine()
-        preparedForSeek = null
+        clearTransition()
         audio = null
         current = null
         state = State.STOPPED
@@ -339,7 +382,7 @@ object MusicPlayer {
     private class LoadedTrack(val bytes: ByteArray, val durationMs: Long, val gain: Float, val message: String)
     private class PreparedNext(
         val from: NeteaseTrack, val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack,
-        val mode: TrackTransitionMode, val plan: TrackTransition.Plan?,
+        val mode: TrackTransitionMode, val seconds: Int, val matchTempo: Boolean, val plan: TrackTransition.Plan?,
     )
 
     private fun loadTrack(track: NeteaseTrack, active: () -> Boolean): LoadedTrack {
@@ -377,12 +420,28 @@ object MusicPlayer {
         trackGain = loaded.gain
     }
 
-    private fun canTransition() = transitionMode != TrackTransitionMode.OFF && !shuffle && !repeatOne && radio == null && !followMode &&
+    private fun canTransition(manual: Boolean = false) = transitionMode != TrackTransitionMode.OFF &&
+        (manual || !repeatOne) && !followMode &&
         party.role == me.sorihiko.dango.party.ListenParty.Role.NONE
 
-    private fun nextTransitionIndex(): Int {
-        val size = queue.size
-        return if (size > 1 && index in 0 until size) (index + 1) % size else -1
+    private fun clearTransition() {
+        preparedForSeek = null
+        manualNext = null
+        shuffleNext = null
+        lastTransition = null
+    }
+
+    @Synchronized private fun nextTransitionIndex(): Int {
+        val list = queue
+        val from = current ?: return -1
+        if (list.size <= 1 || index !in list.indices) return -1
+        if (radio != null) return (index + 1).takeIf { it in list.indices } ?: -1
+        if (!shuffle) return (index + 1) % list.size
+        val reserved = shuffleNext
+        if (reserved?.from === from && list.getOrNull(reserved.index) === reserved.track && reserved.index != index) return reserved.index
+        val next = pickRandom(list.size)
+        shuffleNext = ShuffleNext(from, next, list[next])
+        return next
     }
 
     private fun load(gen: Int, track: NeteaseTrack, startAt: (() -> Long)? = null, paused: Boolean = false) {
@@ -562,13 +621,18 @@ object MusicPlayer {
         var source: AudioDecoder? = null
         var prefetch: Future<PreparedNext>? = null
         var prepareMode = transitionMode
+        var prepareSeconds = transitionSeconds
+        var prepareTempo = transitionTempoMatch
+        var prepareShuffle = shuffle
         var prepared = preparedForSeek?.takeIf {
-            it.mode == prepareMode && it.from === current && it.index == nextTransitionIndex() &&
+            it.mode == prepareMode && it.seconds == prepareSeconds && it.matchTempo == prepareTempo &&
+                it.from === current && it.index == nextTransitionIndex() &&
                 queue.getOrNull(it.index) === it.track
         }
         var requested = prepared != null
         var blendRejected = false
         var handoff: PreparedNext? = null
+        var handoffPlan: TrackTransition.Plan? = null
         var boundaryMicros = 0L
         var incomingStartMs = 0L
 
@@ -598,9 +662,16 @@ object MusicPlayer {
                 applyLoaded(next.track, next.loaded)
                 index = next.index
                 current = next.track
+                shuffleNext = null
+                manualNext = null
+                val plan = handoffPlan
+                lastTransition = TransitionResult(plan?.mode ?: TrackTransitionMode.GAPLESS,
+                    plan?.overlapMs ?: 0L, plan?.speed ?: 1.0, System.nanoTime())
+                if (radio != null && index >= queue.size - 2) extendRadio(null)
                 failedTracks.clear()
                 clearBeats()
                 handoff = null
+                handoffPlan = null
             }
         }
 
@@ -627,13 +698,17 @@ object MusicPlayer {
                 (source as? TrackBlend)?.finish()?.let { source = it }
                 val frame = pending ?: source!!.read()
                 pending = null
-                if (prepareMode != transitionMode) {
+                if (prepareMode != transitionMode || prepareSeconds != transitionSeconds ||
+                    prepareTempo != transitionTempoMatch || prepareShuffle != shuffle) {
                     prefetch?.cancel(true)
                     prefetch = null
                     prepared = null
                     requested = false
                     blendRejected = false
                     prepareMode = transitionMode
+                    prepareSeconds = transitionSeconds
+                    prepareTempo = transitionTempoMatch
+                    prepareShuffle = shuffle
                 }
                 prefetch?.takeIf { it.isDone }?.let {
                     val result = runCatching { it.get() }.getOrElse { error ->
@@ -645,11 +720,22 @@ object MusicPlayer {
                     prefetch = null
                 }
                 val next = prepared
-                val blend = if (!blendRejected && frame != null && source !is TrackBlend) next?.plan?.let {
-                    TrackTransition.atPosition(it, decodedMs.toLong(), durationMs)
+                val manual = manualNext?.takeIf { it.generation == gen && handoff == null }
+                if (manual != null && (!canTransition(manual = true) || !transitionOnNext ||
+                        !transitionMode.overlaps || System.nanoTime() >= manual.deadline)) {
+                    synchronized(this) {
+                        if (gen == generation && manualNext === manual) advanceWithTransitionFallback()
+                    }
+                    return
+                }
+                val blend = if (!blendRejected && frame != null && source !is TrackBlend && next != null) {
+                    if (manual == null) next.plan?.let { TrackTransition.atPosition(it, decodedMs.toLong(), durationMs) }
+                    else TrackTransition.manualAt(next.mode, next.plan, decodedMs.toLong(), durationMs,
+                        next.loaded.durationMs.takeIf { it > 0 } ?: next.track.durationMs, prepareSeconds)
                 } else null
                 if (frame == null || blend != null) {
-                    if (next != null && next.mode == transitionMode && out != null && !out.lost && canTransition() &&
+                    if (next != null && next.mode == transitionMode && out != null && !out.lost &&
+                        canTransition(manual = manual != null) && (manual == null || manual.index == next.index) &&
                         next.from === current &&
                         next.index == nextTransitionIndex() && queue.getOrNull(next.index) === next.track && gen == generation) {
                         val cue = blend?.entryMs ?: 0L
@@ -676,14 +762,16 @@ object MusicPlayer {
                                 pending = head
                             } else if (blend != null) {
                                 source = TrackBlend(source!!, frame, decoder, head,
-                                    blend.overlapMs, trackGain, next.loaded.gain, blend.bassExchange)
+                                    blend.overlapMs, trackGain, next.loaded.gain, blend.bassExchange, blend.speed)
                             }
                             handoff = next
+                            handoffPlan = blend
                             boundaryMicros = writtenFrames * 1_000_000L / outputRate
                             decodedMs = incoming.skippedMs
                             incomingStartMs = decodedMs.toLong()
-                            DangoLogger.info("Dango Music transition queued: mode={} overlapMs={} incomingMs={} beatAligned={} converted={}",
-                                next.mode, blend?.overlapMs ?: 0L, incomingStartMs, blend?.bassExchange == true, inputHead !== head)
+                            DangoLogger.info("Dango Music transition queued: mode={} actual={} overlapMs={} incomingMs={} speed={} manual={} converted={}",
+                                next.mode, blend?.mode ?: TrackTransitionMode.GAPLESS, blend?.overlapMs ?: 0L,
+                                incomingStartMs, blend?.speed ?: 1.0, manual != null, inputHead !== head)
                             lowPass = 0f
                             avgEnergy = 0f
                             lastBeatMs = -1000f
@@ -727,13 +815,15 @@ object MusicPlayer {
                 }
                 if (gen != generation) break
                 // 只准备队列里紧接着的一首，下载慢时到 EOF 仍照常切歌。
-                if (!requested && handoff == null && canTransition() &&
+                if (!requested && handoff == null && canTransition(manual = manual != null) &&
                     (prepareMode != TrackTransitionMode.GAPLESS || durationMs - decodedMs <= 30_000f)) {
                     val nextIndex = nextTransitionIndex()
                     val from = current
                     val track = queue.getOrNull(nextIndex)
                     if (from != null && track != null) {
                         val mode = prepareMode
+                        val seconds = prepareSeconds
+                        val matchTempo = prepareTempo
                         val outgoing = audio ?: bytes
                         val outgoingMs = durationMs
                         requested = true
@@ -743,9 +833,9 @@ object MusicPlayer {
                             val loaded = loadTrack(track, active)
                             val plan = runCatching {
                                 TrackTransition.plan(mode, outgoing, loaded.bytes, outgoingMs,
-                                    loaded.durationMs.takeIf { it > 0 } ?: track.durationMs, active)
+                                    loaded.durationMs.takeIf { it > 0 } ?: track.durationMs, active, seconds, matchTempo)
                             }.getOrNull()
-                            PreparedNext(from, nextIndex, track, loaded, mode, plan)
+                            PreparedNext(from, nextIndex, track, loaded, mode, seconds, matchTempo, plan)
                         }
                     }
                 }
@@ -854,11 +944,13 @@ object MusicPlayer {
                 // 跟随房主时放完就停在结尾，等房主切下一首
                 pausedAtMs = durationMs
                 state = State.PAUSED
+            } else if (manualNext?.generation == gen) {
+                advanceWithTransitionFallback()
             } else if (repeatOne) {
                 // 复用已下载的音频，从头解码，不重新请求播放地址或下载。
                 seek(0L)
             } else {
-                next()
+                advanceWithTransitionFallback()
             }
         }
     }

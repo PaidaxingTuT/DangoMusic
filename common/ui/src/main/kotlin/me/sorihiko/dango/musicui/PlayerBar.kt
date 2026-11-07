@@ -8,6 +8,7 @@ import me.sorihiko.dango.music.MusicPlayer
 import me.sorihiko.dango.music.MusicScreen
 import me.sorihiko.dango.music.MusicSource
 import me.sorihiko.dango.music.NeteaseApi
+import me.sorihiko.dango.music.TrackTransitionMode
 import me.sorihiko.dango.ui.LayoutBounds
 import me.sorihiko.dango.ui.ShadowStyle
 import me.sorihiko.dango.ui.ShapeStyle
@@ -24,6 +25,7 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
     private var lastSubtitle = ""
     private var subtitleAt = 0L
     private var lastSkipNotice = 0L
+    private var lastTransitionNotice = 0L
     private var lastBlockedNotice = 0L
     private var failedMembers = emptySet<String>()
     private var progRect = LayoutBounds()
@@ -70,9 +72,11 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
         val infoW = (leftLimit - infoX - (if (likeShown) 44f else 8f)).coerceIn(40f, 220f)
         val title = t?.name ?: I18n.text("Not playing")
         ui.text(ui.trim(title, infoW, 13f, Theme.FONT_SEMIBOLD), infoX, coverBox.y + 9f, 13f, Theme.TEXT_PRIMARY, Theme.FONT_SEMIBOLD)
+        val transitionPending = MusicPlayer.transitionPending
         val sub = when {
             t == null -> "-"
             MusicPlayer.message.isNotEmpty() -> I18n.message(MusicPlayer.message)
+            transitionPending -> I18n.text("Preparing next track…")
             else -> t.artists.joinToString(" / ")
         }
         // 一起听：房主没开"允许成员控制"时点了切歌 / 暂停 / 拖进度
@@ -88,6 +92,18 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
             // 重开界面不重放过期事件，也不延长仍在显示的提示。
             if (skipAt != 0L && remaining > 0L) Library.showTemporaryStatus(
                 I18n.text("This song could not be played. Skipped to the next song."), remaining / 1_000_000L)
+        }
+        MusicPlayer.lastTransition?.let { transition ->
+            if (lastTransitionNotice != transition.atNanos) {
+                lastTransitionNotice = transition.atNanos
+                val remaining = 3_000_000_000L - (System.nanoTime() - transition.atNanos)
+                if (remaining > 0) {
+                    val mode = I18n.text(if (transition.mode == TrackTransitionMode.OFF) "Regular track switch" else transition.mode.label)
+                    val title = if (transition.overlapMs > 0) I18n.format("%s · %.1f s", mode, transition.overlapMs / 1000.0) else mode
+                    val detail = if (transition.speed != 1.0) I18n.format("%s · %.2f× tempo", title, transition.speed) else title
+                    Library.showTemporaryStatus(detail, remaining / 1_000_000L)
+                }
+            }
         }
         val failures = me.sorihiko.dango.party.ListenParty.members.filter {
             it.failedTrack.isNotEmpty() && it.failedTrack == t?.key
@@ -111,7 +127,7 @@ internal class PlayerBar(private val screen: MusicScreen, private val module: Ne
             ui.beginClip(LayoutBounds(infoX, coverBox.y + 23f, infoW, 20f))
             ui.text(sub, infoX - offset, coverBox.y + 27f, 11f, Theme.TEXT_SECONDARY)
             ui.endClip()
-        } else if (t != null && MusicPlayer.message.isEmpty()) {
+        } else if (t != null && MusicPlayer.message.isEmpty() && !transitionPending) {
             // 歌手名可以点，打开歌手页
             drawArtistLinks(screen, t, infoX, coverBox.y + 27f, infoW, 11f, Theme.TEXT_SECONDARY)
         } else ui.text(ui.trim(sub, infoW, 11f), infoX, coverBox.y + 27f, 11f, Theme.TEXT_SECONDARY)

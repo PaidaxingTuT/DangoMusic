@@ -123,8 +123,17 @@ class NeteaseMusicModule : Module() {
     @ModuleValue("Gapless playback", "Preload the next song and join compatible tracks in solo sequential playback")
     private val gapless = BooleanValue(false)
 
-    @ModuleValue("Track transition", "Transition between compatible tracks in solo sequential playback")
+    @ModuleValue("Track transition", "Blend tracks in solo playback")
     private val trackTransition = IntValue(0, TrackTransitionMode.entries.lastIndex, TrackTransitionMode.OFF.ordinal)
+
+    @ModuleValue("Transition duration", "Target overlap for automatic track transitions")
+    private val transitionSeconds = IntValue(2, 15, 7)
+
+    @ModuleValue("Blend on Next", "Use a short transition when you press Next")
+    private val transitionOnNext = BooleanValue(true)
+
+    @ModuleValue("Match tempo", "Align nearby tempos in Rhythm blend while preserving pitch")
+    private val transitionTempoMatch = BooleanValue(true)
 
     @ModuleValue("Environment audio", "Echo follows the room you are in (size and materials), muffled underwater")
     private val envAudio = BooleanValue(true)
@@ -324,6 +333,9 @@ class NeteaseMusicModule : Module() {
 
         MusicPlayer.normalize = normalize.get()
         MusicPlayer.transitionMode = TrackTransitionMode.entries[trackTransition.value]
+        MusicPlayer.transitionSeconds = transitionSeconds.value
+        MusicPlayer.transitionOnNext = transitionOnNext.get()
+        MusicPlayer.transitionTempoMatch = transitionTempoMatch.get()
 
         // 环境音效：设置和玩家周围的环境交给解码线程
         EnvironmentAudio.enabled = envAudio.get()

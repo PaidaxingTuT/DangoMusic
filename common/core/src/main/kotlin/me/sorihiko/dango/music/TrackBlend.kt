@@ -1,12 +1,14 @@
 package me.sorihiko.dango.music
 
 import java.util.concurrent.CancellationException
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /** Feeds one PCM stream to the existing output while two compatible decoders overlap. */
-internal class TrackBlend(
-    private val outgoing: AudioDecoder,
+internal class TrackBlend @JvmOverloads constructor(
+    outgoing: AudioDecoder,
     outgoingHead: AudioDecoder.Frame,
     private val incoming: AudioDecoder,
     incomingHead: AudioDecoder.Frame,
@@ -14,13 +16,17 @@ internal class TrackBlend(
     private val outgoingGain: Float,
     private val incomingGain: Float,
     private val bassExchange: Boolean,
+    speed: Double = 1.0,
 ) : AudioDecoder {
     private val rate = incomingHead.rate
     private val channels = incomingHead.channels
     private val overlapFrames = (overlapMs * rate / 1000).coerceAtLeast(1)
+    private var endFrame = overlapFrames
     private var mixedFrames = 0L
-    private var a: AudioDecoder.Frame? = outgoingHead
+    private val outgoing = if (speed == 1.0) outgoing else TempoStretch(outgoing, outgoingHead, speed)
+    private var a: AudioDecoder.Frame? = outgoingHead.takeIf { speed == 1.0 }
     private var aOffset = 0
+    private var aEndedAt = -1L
     private var b: AudioDecoder.Frame? = incomingHead
     private val lowPass = (1.0 - exp(-2.0 * Math.PI * 180 / rate)).toFloat()
     private val lowA = FloatArray(channels)
@@ -31,13 +37,29 @@ internal class TrackBlend(
         b = null
         check(frame.rate == rate && frame.channels == channels) { "Incoming audio format changed during transition" }
         val mixed = ShortArray(frame.length)
+        val sum = FloatArray(channels)
         for (i in mixed.indices step channels) {
-            if (mixedFrames < overlapFrames && a?.let { aOffset == it.length } == true) {
+            if (mixedFrames < endFrame && aEndedAt < 0 && (a == null || aOffset == a?.length)) {
                 a = outgoing.read()?.takeIf { it.rate == rate && it.channels == channels }
                 aOffset = 0
+                if (a == null) {
+                    aEndedAt = mixedFrames
+                    endFrame = minOf(endFrame, mixedFrames + (rate * 120L / 1000).coerceAtLeast(1))
+                }
             }
-            val old = if (mixedFrames < overlapFrames) a else null
-            val progress = if (old == null) 1f else (mixedFrames + 1f) / overlapFrames
+            val old = if (mixedFrames < endFrame) a else null
+            val progress = when {
+                mixedFrames >= endFrame -> 1f
+                aEndedAt < 0 -> (mixedFrames + 1f) / overlapFrames
+                else -> {
+                    val start = aEndedAt.toFloat() / overlapFrames
+                    start + (1f - start) * (mixedFrames - aEndedAt + 1f) / (endFrame - aEndedAt)
+                }
+            }
+            val gainA = sqrt(1f - progress)
+            val gainB = sqrt(progress)
+            val headroom = 1f - 0.56f * progress * (1f - progress)
+            var peak = 32767f
             for (channel in 0 until channels) {
                 var sampleA = if (old == null) 0f else old.samples[aOffset + channel] * outgoingGain
                 var sampleB = frame.samples[i + channel] * incomingGain
@@ -47,8 +69,12 @@ internal class TrackBlend(
                     sampleA -= lowA[channel] * (2f * progress - 1f).coerceAtLeast(0f)
                     sampleB -= lowB[channel] * (1f - 2f * progress).coerceAtLeast(0f)
                 }
-                val sample = sampleA * (1f - progress) + sampleB * progress
-                mixed[i + channel] = sample.roundToInt().coerceIn(-32768, 32767).toShort()
+                sum[channel] = (sampleA * gainA + sampleB * gainB) * headroom
+                peak = maxOf(peak, abs(sum[channel]))
+            }
+            val limiter = 32767f / peak
+            for (channel in 0 until channels) {
+                mixed[i + channel] = (sum[channel] * limiter).roundToInt().coerceIn(-32768, 32767).toShort()
             }
             if (old != null) aOffset += channels
             mixedFrames++
@@ -57,7 +83,7 @@ internal class TrackBlend(
     }
 
     fun finish(): AudioDecoder? {
-        if (mixedFrames < overlapFrames) return null
+        if (mixedFrames < endFrame) return null
         try { outgoing.close() } catch (_: Exception) {}
         return incoming
     }

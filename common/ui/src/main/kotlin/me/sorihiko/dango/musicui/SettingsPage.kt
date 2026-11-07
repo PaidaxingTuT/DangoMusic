@@ -49,7 +49,7 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
     private val choiceLabels = mapOf(
         "lyricColors" to listOf("Custom color", "Cover color", "Cover gradient", "Rainbow"),
         "audioOutput" to listOf("Auto", "Java Sound", "Game audio (OpenAL)"),
-        "trackTransition" to listOf("Off", "Gapless playback", "Crossfade", "Natural blend", "Rhythm blend"),
+        "trackTransition" to me.sorihiko.dango.music.TrackTransitionMode.entries.map { it.label },
     )
 
     /** 显示成百分比的选项 */
@@ -260,7 +260,8 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
 
         val player = Src(module,
             deps = mapOf("envRain" to "envAudio", "envStrength" to "envAudio", "envRays" to "envAudio"),
-            fmts = mapOf("volume" to ::percent, "envStrength" to ::percent))
+            fmts = mapOf("volume" to ::percent, "envStrength" to ::percent,
+                "transitionSeconds" to { v: Any -> I18n.format("%d s", (v as IntValue).value) }))
         player.left.remove("shuffle")   // 随机播放用播放栏上的按钮就够了，设置页不再显示（状态照样保存）
         player.left.remove("repeatOne") // 单曲循环同样通过播放栏控制
         player.left.remove("gapless")   // 旧设置用于迁移，界面只显示新的过渡模式。
@@ -273,7 +274,9 @@ internal class SettingsPage(private val screen: MusicScreen, private val module:
         val updates = player.take(listOf("checkUpdates"))
         val environment = player.take(listOf("envAudio", "envRain", "envStrength", "envRays"))
         val music = listOf(
-            Group("Player", "Playback", player.m, false, player.take(listOf("volume", "normalize", "trackTransition", "audioOutput", "language"))),
+            Group("Player", "Playback", player.m, false, player.take(listOf("volume", "normalize", "audioOutput", "language"))),
+            Group("Track transition", "Blend tracks in solo playback", player.m, false,
+                player.take(listOf("trackTransition", "transitionSeconds", "transitionOnNext", "transitionTempoMatch"))),
             Group("Environment audio", "Sound around you", player.m, false, environment),
             Group("Hotkeys", "Click, then press a key · Backspace clears", player.m, false, player.take()),
             Group("Song card", "Overlay", card.m, true, card.take()),

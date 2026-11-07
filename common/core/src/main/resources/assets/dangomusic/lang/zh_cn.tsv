@@ -338,6 +338,18 @@ Gapless playback	无缝播放
 Preload the next song and join compatible tracks in solo sequential playback	单人顺序播放时提前加载下一首，音频格式兼容时连续播放
 Track transition	歌曲过渡
 Transition between compatible tracks in solo sequential playback	单人顺序播放时，为音频格式兼容的歌曲应用过渡
+Blend tracks in solo playback	单人播放时混合相邻曲目
+Transition duration	过渡时长
+Target overlap for automatic track transitions	自动切歌时两首歌交叠的目标时长
+Blend on Next	下一首也使用过渡
+Use a short transition when you press Next	按下一首时使用短过渡
+Match tempo	节拍速度匹配
+Align nearby tempos in Rhythm blend while preserving pitch	节奏融合时对齐接近的速度并保持音高
+Preparing next track…	正在准备下一首…
+Regular track switch	普通切歌
+%d s	%d 秒
+%s · %.1f s	%s · %.1f 秒
+%s · %.2f× tempo	%s · %.2f 倍节拍
 Off	关闭
 Crossfade	淡入淡出
 Natural blend	自然衔接
