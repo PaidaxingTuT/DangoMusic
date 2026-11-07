@@ -62,7 +62,7 @@ object MusicPlayer {
     @Volatile private var line: AudioOutput? = null
     @Volatile private var seekBaseMs = 0L
     @Volatile private var pausedAtMs = 0L
-    @Volatile private var pauseRevision = 0
+    @Volatile private var preparedForSeek: PreparedNext? = null
 
     val durationMs: Long get() = current?.durationMs ?: 0L
 
@@ -156,6 +156,7 @@ object MusicPlayer {
         index = idx
         val gen = ++generation
         stopLine()
+        preparedForSeek = null
         audio = null
         current = track
         state = State.LOADING
@@ -218,6 +219,7 @@ object MusicPlayer {
         index = 0
         val gen = ++generation
         stopLine()
+        preparedForSeek = null
         audio = null
         current = track
         state = State.LOADING
@@ -287,7 +289,6 @@ object MusicPlayer {
         }
         when (state) {
             State.PLAYING -> {
-                pauseRevision++
                 pausedAtMs = positionMs
                 state = State.PAUSED
                 line?.stop()
@@ -326,6 +327,7 @@ object MusicPlayer {
     @Synchronized fun stop() {
         ++generation
         stopLine()
+        preparedForSeek = null
         audio = null
         current = null
         state = State.STOPPED
@@ -336,7 +338,7 @@ object MusicPlayer {
 
     private class LoadedTrack(val bytes: ByteArray, val durationMs: Long, val gain: Float, val message: String)
     private class PreparedNext(
-        val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack,
+        val from: NeteaseTrack, val index: Int, val track: NeteaseTrack, val loaded: LoadedTrack,
         val mode: TrackTransitionMode, val plan: TrackTransition.Plan?,
     )
 
@@ -355,7 +357,7 @@ object MusicPlayer {
                 else if (NeteaseApi.loggedIn) "这首歌没有播放权限" else "需要登录才能播放（VIP 歌曲）")
         }
         // Cloud list duration units are not reliable. Use compressed audio timing before enabling seeking.
-        val measuredDuration = if (track.cloud) AudioAnalysis.duration(bytes, active) else 0L
+        val measuredDuration = if (track.cloud || transitionMode != TrackTransitionMode.OFF) AudioAnalysis.duration(bytes, active) else 0L
         val measuredGain = if (normalize) AudioAnalysis.gain(bytes, active) else null
         val gain = if (normalize) measuredGain ?: loudnessGain(url) else 1f
         val message = when {
@@ -377,6 +379,11 @@ object MusicPlayer {
 
     private fun canTransition() = transitionMode != TrackTransitionMode.OFF && !shuffle && !repeatOne && radio == null && !followMode &&
         party.role == me.sorihiko.dango.party.ListenParty.Role.NONE
+
+    private fun nextTransitionIndex(): Int {
+        val size = queue.size
+        return if (size > 1 && index in 0 until size) (index + 1) % size else -1
+    }
 
     private fun load(gen: Int, track: NeteaseTrack, startAt: (() -> Long)? = null, paused: Boolean = false) {
         try {
@@ -554,12 +561,33 @@ object MusicPlayer {
         var finished = false
         var source: AudioDecoder? = null
         var prefetch: Future<PreparedNext>? = null
-        var requested = false
-        var prepared: PreparedNext? = null
         var prepareMode = transitionMode
+        var prepared = preparedForSeek?.takeIf {
+            it.mode == prepareMode && it.from === current && it.index == nextTransitionIndex() &&
+                queue.getOrNull(it.index) === it.track
+        }
+        var requested = prepared != null
+        var blendRejected = false
         var handoff: PreparedNext? = null
         var boundaryMicros = 0L
         var incomingStartMs = 0L
+
+        fun writePcm(output: AudioOutput, data: ByteArray) {
+            var offset = 0
+            while (offset < data.size && gen == generation) {
+                if (state == State.PAUSED) {
+                    if (output.isRunning) output.stop()
+                    Thread.sleep(10)
+                    continue
+                }
+                val written = output.write(data, offset, data.size - offset)
+                if (written == 0 && gen == generation) {
+                    check(!output.lost) { "Audio output was lost" }
+                    Thread.sleep(5)
+                }
+                offset += written
+            }
+        }
 
         fun publishHandoff(positionMicros: Long) {
             val next = handoff ?: return
@@ -594,7 +622,6 @@ object MusicPlayer {
             var outputRate = 0
             var outputChannels = 0
             var writtenFrames = 0L
-            var outputPauseRevision = pauseRevision
             var pending = first
             while (gen == generation) {
                 (source as? TrackBlend)?.finish()?.let { source = it }
@@ -605,52 +632,75 @@ object MusicPlayer {
                     prefetch = null
                     prepared = null
                     requested = false
+                    blendRejected = false
                     prepareMode = transitionMode
                 }
                 prefetch?.takeIf { it.isDone }?.let {
-                    prepared = runCatching { it.get() }.getOrNull()
+                    val result = runCatching { it.get() }.getOrElse { error ->
+                        DangoLogger.info("Dango Music transition: {} preload failed ({})", prepareMode, error.cause?.javaClass?.simpleName ?: error.javaClass.simpleName)
+                        null
+                    }
+                    prepared = result
+                    synchronized(this) { if (gen == generation) preparedForSeek = result }
                     prefetch = null
                 }
                 val next = prepared
-                val lateMs = next?.plan?.let { decodedMs.toLong() - it.exitMs }
-                val blend = next?.plan?.takeIf {
-                    frame != null && source !is TrackBlend && lateMs != null && lateMs in 0..minOf(500L, it.overlapMs / 2)
-                }
+                val blend = if (!blendRejected && frame != null && source !is TrackBlend) next?.plan?.let {
+                    TrackTransition.atPosition(it, decodedMs.toLong(), durationMs)
+                } else null
                 if (frame == null || blend != null) {
-                    // Java Sound can accept only part of a write when paused, making the boundary uncertain.
-                    if (next != null && next.mode == transitionMode && out != null && !out.lost &&
-                        outputPauseRevision == pauseRevision && canTransition() &&
-                        next.index == index + 1 && queue.getOrNull(next.index) === next.track && gen == generation) {
-                        val cue = if (blend?.bassExchange == true) blend.entryMs + (lateMs ?: 0L) else blend?.entryMs ?: 0L
+                    if (next != null && next.mode == transitionMode && out != null && !out.lost && canTransition() &&
+                        next.from === current &&
+                        next.index == nextTransitionIndex() && queue.getOrNull(next.index) === next.track && gen == generation) {
+                        val cue = blend?.entryMs ?: 0L
                         val incoming = runCatching {
                             TrackBlend.openIncoming(next.loaded.bytes, cue) { gen == generation }
                         }.getOrNull()
-                        val head = incoming?.first
-                        if (head != null && head.rate == outputRate && head.channels == outputChannels &&
+                        val inputHead = incoming?.first
+                        val inputDecoder = incoming?.decoder
+                        var decoder = inputDecoder
+                        var head = inputHead
+                        if (inputDecoder != null && inputHead != null &&
+                            (inputHead.rate != outputRate || inputHead.channels != outputChannels)) {
+                            head = runCatching {
+                                val converted = PcmAdapter(inputDecoder, inputHead, outputRate, outputChannels)
+                                decoder = converted
+                                converted.read()
+                            }.getOrNull()
+                        }
+                        if (incoming != null && decoder != null && head != null &&
                             (frame == null || (frame.rate == outputRate && frame.channels == outputChannels))) {
                             if (frame == null) {
                                 try { source?.close() } catch (_: Exception) {}
-                                source = incoming.decoder
+                                source = decoder
                                 pending = head
                             } else if (blend != null) {
-                                source = TrackBlend(source!!, frame, incoming.decoder, head,
-                                    blend.overlapMs - (lateMs ?: 0L), trackGain, next.loaded.gain, blend.bassExchange)
+                                source = TrackBlend(source!!, frame, decoder, head,
+                                    blend.overlapMs, trackGain, next.loaded.gain, blend.bassExchange)
                             }
                             handoff = next
                             boundaryMicros = writtenFrames * 1_000_000L / outputRate
-                            incomingStartMs = incoming.skippedMs.toLong()
                             decodedMs = incoming.skippedMs
+                            incomingStartMs = decodedMs.toLong()
+                            DangoLogger.info("Dango Music transition queued: mode={} overlapMs={} incomingMs={} beatAligned={} converted={}",
+                                next.mode, blend?.overlapMs ?: 0L, incomingStartMs, blend?.bassExchange == true, inputHead !== head)
                             lowPass = 0f
                             avgEnergy = 0f
                             lastBeatMs = -1000f
                             prepared = null
+                            synchronized(this) { if (gen == generation) preparedForSeek = null }
                             requested = false
+                            blendRejected = false
                             continue
                         }
-                        try { incoming?.decoder?.close() } catch (_: Exception) {}
-                        prepared = null
+                        try { decoder?.close() } catch (_: Exception) {}
+                        blendRejected = true
                     }
                     if (frame == null) {
+                        if (prepareMode != TrackTransitionMode.OFF && nextTransitionIndex() >= 0 && gen == generation) {
+                            DangoLogger.info("Dango Music transition: mode={} regular cut (prepared={}, pending={})",
+                                prepareMode, prepared != null, prefetch != null)
+                        }
                         finished = true
                         break
                     }
@@ -660,7 +710,6 @@ object MusicPlayer {
                     out = openOutput(format, frame.rate * frame.channels * 2 / 4)   // 约 0.25 秒缓冲
                     outputRate = frame.rate
                     outputChannels = frame.channels
-                    outputPauseRevision = pauseRevision
                     line = out
                     if (state == State.PAUSED) {
                         out.stop()
@@ -678,10 +727,12 @@ object MusicPlayer {
                 }
                 if (gen != generation) break
                 // 只准备队列里紧接着的一首，下载慢时到 EOF 仍照常切歌。
-                if (!requested && handoff == null && outputPauseRevision == pauseRevision &&
-                    canTransition() && durationMs - decodedMs <= 30_000f) {
-                    val nextIndex = index + 1
-                    queue.getOrNull(nextIndex)?.let { track ->
+                if (!requested && handoff == null && canTransition() &&
+                    (prepareMode != TrackTransitionMode.GAPLESS || durationMs - decodedMs <= 30_000f)) {
+                    val nextIndex = nextTransitionIndex()
+                    val from = current
+                    val track = queue.getOrNull(nextIndex)
+                    if (from != null && track != null) {
                         val mode = prepareMode
                         val outgoing = audio ?: bytes
                         val outgoingMs = durationMs
@@ -694,7 +745,7 @@ object MusicPlayer {
                                 TrackTransition.plan(mode, outgoing, loaded.bytes, outgoingMs,
                                     loaded.durationMs.takeIf { it > 0 } ?: track.durationMs, active)
                             }.getOrNull()
-                            PreparedNext(nextIndex, track, loaded, mode, plan)
+                            PreparedNext(from, nextIndex, track, loaded, mode, plan)
                         }
                     }
                 }
@@ -740,7 +791,7 @@ object MusicPlayer {
                     data[k * 2 + 1] = ((v shr 8) and 0xFF).toByte()
                 }
                 try {
-                    out.write(data, 0, data.size)
+                    writePcm(out, data)
                 } catch (e: Throwable) {
                     if (!out.lost || gen != generation) throw e
                     // 游戏重启了声音系统：换一个新的输出，从这一块接着放（缓冲里没放完的零点几秒丢掉）
@@ -749,7 +800,6 @@ object MusicPlayer {
                     outputRate = frame.rate
                     outputChannels = frame.channels
                     writtenFrames = 0L
-                    outputPauseRevision = pauseRevision
                     val frameStartMs = (decodedMs - frameMs).toLong()
                     if (handoff == null) {
                         seekBaseMs = frameStartMs
@@ -761,8 +811,9 @@ object MusicPlayer {
                     if (reopened.lost) throw e
                     reopened.setVolume(volume)
                     appliedVolume = volume
-                    reopened.write(data, 0, data.size)
+                    writePcm(reopened, data)
                 }
+                if (gen != generation) break
                 writtenFrames += len / outputChannels
                 // 写进缓冲的 PCM 还没出声，等输出时钟到达两首歌的交界再更新歌词。
                 if (handoff != null) {

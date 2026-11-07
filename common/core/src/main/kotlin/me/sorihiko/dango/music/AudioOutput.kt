@@ -19,8 +19,8 @@ interface AudioOutput {
     fun start()
     fun stop()
 
-    /** 送一段数据进去；缓冲满了就等着，直到放出去一些 */
-    fun write(data: ByteArray, offset: Int, length: Int)
+    /** 送一段数据进去并返回写入的字节数。暂停时可能只写入一部分。 */
+    fun write(data: ByteArray, offset: Int, length: Int): Int
 
     /** 等已经送进去的数据全部放完 */
     fun drain()
@@ -56,9 +56,9 @@ class JavaSoundOutput(private val line: SourceDataLine) : AudioOutput {
 
     override fun start() = line.start()
     override fun stop() = line.stop()
-    override fun write(data: ByteArray, offset: Int, length: Int) {
+    override fun write(data: ByteArray, offset: Int, length: Int): Int {
         val volume = softwareVolume
-        if (volume == 1f) {
+        return if (volume == 1f) {
             line.write(data, offset, length)
         } else {
             require(length % 2 == 0 && offset >= 0 && length >= 0 && offset <= data.size - length)

@@ -13,6 +13,19 @@ internal object TrackTransition {
     private const val ANALYSIS_MS = 12_000L
     private const val FADE_MS = 5_000L
 
+    /** A seek or a slow download can miss the musical cue. Use the remaining tail for a shorter fade. */
+    fun atPosition(plan: Plan, positionMs: Long, durationMs: Long): Plan? {
+        if (positionMs < plan.exitMs) return null
+        val lateMs = positionMs - plan.exitMs
+        val remaining = plan.overlapMs - lateMs
+        if (remaining >= 180) {
+            val aligned = plan.bassExchange && lateMs <= 250
+            return Plan(positionMs, plan.entryMs + if (aligned) lateMs else 0, remaining, aligned)
+        }
+        val tail = (durationMs - positionMs).coerceAtMost(FADE_MS)
+        return if (tail >= 180) Plan(positionMs, 0, tail) else null
+    }
+
     fun plan(mode: TrackTransitionMode, outgoing: ByteArray, incoming: ByteArray,
              outgoingMs: Long, incomingMs: Long, active: () -> Boolean): Plan? {
         if (mode == TrackTransitionMode.OFF || mode == TrackTransitionMode.GAPLESS) return null

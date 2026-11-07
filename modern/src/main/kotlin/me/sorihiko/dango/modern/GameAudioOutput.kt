@@ -69,18 +69,19 @@ class GameAudioOutput private constructor(
         if (!closed && alive()) AL10.alSourcePause(source)
     }
 
-    override fun write(data: ByteArray, offset: Int, length: Int) {
+    override fun write(data: ByteArray, offset: Int, length: Int): Int {
         var off = offset
         var left = length - length % frameBytes
         while (left > 0) {
             // 切歌 / 拖进度时旧的解码线程还会写一下：已经关了就直接丢掉（和 Java Sound 一样）
-            if (closed) return
+            if (closed) return off - offset
             val n = minOf(left, pending.remaining())
             pending.put(data, off, n)
             off += n
             left -= n
             if (!pending.hasRemaining()) submit()
         }
+        return off - offset
     }
 
     /** 把攒好的一块交给音源；缓冲都在用就等最早一块放完 */
